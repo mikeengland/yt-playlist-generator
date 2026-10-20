@@ -48,7 +48,7 @@ A command-line tool, `djset`, that I run on my Mac with a YouTube Set link. It l
 ### Identification
 
 30. As a listener, I want the whole Set sampled with a Clip every 15 seconds, so that fast-changing Sets don't lose Plays between Clips.
-31. As a listener, I want the agent to read the description and comments in whatever format people use ("Artist – Title" or "Title – Artist", emoji, @credits, "A x B – Title1 x Title2" for Blends, lowercase partial titles like "7:50 numb"), so that useful hints aren't lost to formatting.
+31. As a listener, I want the agent to read the description and comments in whatever format people use ("Artist – Title" or "Title – Artist", emoji, `@username` credits, "A x B – Title1 x Title2" for Blends, lowercase partial titles like "7:50 numb"), so that useful hints aren't lost to formatting.
 32. As a listener, I want answers in replies to "what's the track at 24:20?" comments used as Comment Hints, so that crowd-sourced answers count.
 33. As a listener, I want the agent to take extra Clips in gaps and around conflicts (more often, longer, or shifted), so that more Plays are identified.
 34. As a listener, I want the agent's extra work capped at about 100 extra Clips per hour of Set and a fixed AI token budget, so that a confusing Set can't run up time or cost.
