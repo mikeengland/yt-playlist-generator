@@ -22,6 +22,10 @@ _Avoid_: base track, source track
 One occurrence of a Track in a Set, starting at a Timestamp. A Track played twice in a Set is two Plays.
 _Avoid_: entry, appearance, segment
 
+**Blend**:
+Two or more Plays heard at the same time, such as one Track's vocals over another's beat. A pre-made mashup the DJ plays is a single Track, not a Blend.
+_Avoid_: mashup, transition
+
 **Timestamp**:
 The moment in a Set where a Play is first heard, even if it is still being blended in.
 _Avoid_: cue, start time
