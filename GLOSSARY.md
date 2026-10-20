@@ -34,6 +34,28 @@ _Avoid_: setlist, track listing
 What a Play is shown as when its Track couldn't be identified. Commenters write this as "ID".
 _Avoid_: ID, unidentified
 
+### Evidence
+
+**Clip**:
+A short stretch of a Set's audio sent for recognition.
+_Avoid_: sample (in DJ use, a sound lifted from another record), snippet, chunk
+
+**Recognition**:
+What a recognition service reports for one Clip: a Track, or nothing.
+_Avoid_: match, hit, Shazam result
+
+**Comment Hint**:
+A claim, from a Set's description or comments, that a particular Track plays at a particular time.
+_Avoid_: comment ID, suggestion
+
+**Confirmed Play**:
+A Play supported by both a Recognition and a Comment Hint.
+_Avoid_: verified play
+
+**Conflicting Hint**:
+A Comment Hint naming a different Track from the one recognition heard at that time.
+_Avoid_: disagreement, dispute
+
 ### Spotify
 
 **Spotify Match**:
