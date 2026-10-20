@@ -131,7 +131,7 @@ A command-line tool, `djset`, that I run on my Mac with a YouTube Set link. It l
   - comments-only mode
   - rendering and links
   - model selection
-- **Fixtures:** metadata and comments for the design Set and both test Sets have been captured already. Recognitions are captured from real runs on the Mac, since cloud sessions can't download Set audio.
+- **Fixtures:** metadata and comments for the design Set and both test Sets can be fetched in cloud sessions. Recognitions are captured from real runs on the Mac, since cloud sessions can't download Set audio.
 - **Prior art:** none yet. This is the first code in the repository.
 - **Evaluation:** separate from tests. It runs only on request, uses the real services, and costs time and money.
 
