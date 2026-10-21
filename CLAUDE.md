@@ -27,3 +27,14 @@ A command-line agent that works out which Tracks a DJ plays in a YouTube Set, an
 ## Environment
 
 The tool runs on the user's Mac. Cloud sessions can fetch YouTube metadata and comments, but YouTube bot-checks downloads and the network policy blocks its media hosts (`*.googlevideo.com`), so Set audio can only be downloaded locally.
+
+## Commands
+
+- `uv run pytest`: the tests. They run offline, with fakes for YouTube, recognition, the model and the clock.
+- `uv run djset <youtube-link>`: identify a Set. Results go to `~/djset/<video-id>/` (or `$DJSET_HOME`).
+- `uv run djset-eval [--model provider:model]... [--runs N]`: compare models against the reference Sets in `src/djset/references/`. It uses the real services, so it costs time and money; run it only when asked.
+- `uv run python scripts/capture_fixtures.py [--cloud] <video-id>...`: refresh test fixtures. In cloud sessions pass `--cloud`, and put a Deno binary on `PATH` (for example `uv pip install deno` into a scratch environment).
+
+## Code
+
+`src/djset/identify.py` is the use case and the one seam tests drive (see the spec's Testing Decisions). Its boundaries are the Set Source (`youtube.py`), the Recogniser (`recognition.py`), the model (`model_choice.py`) and the Clock (`clock.py`); `tests/fakes.py` has a stand-in for each. Tests assert on the resulting Tracklist, saved files and what reaches a boundary, not on internals.

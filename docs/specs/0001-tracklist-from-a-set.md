@@ -63,11 +63,12 @@ A command-line tool, `djset`, that I run on my Mac with a YouTube Set link. It l
 40. As the developer, I want the tests to run without YouTube, a recognition service or a paid model, so that they are fast, free and work in cloud sessions.
 41. As the developer, I want fixtures captured from real runs (Set info, comments and Recognitions), so that tests use realistic, messy data.
 42. As the developer, I want an evaluation command that scores the tool against Sets with trusted reference tracklists, in an audio-only mode with comments hidden and in normal mode, so that I know whether a change made identification better or worse.
+43. As the developer, I want the evaluation to compare AI models (for example Claude Haiku, Sonnet and Opus, and OpenAI's GPT models) on the same evidence, with accuracy, cost and time measures and their run-to-run spread, so that I know whether switching models keeps Tracklists accurate and what it costs.
 
 ## Implementation Decisions
 
 - **Architecture** (see ADR 0001 and ADR 0002): plain code does the mechanics, and one Pydantic AI agent does the judgement. Before the agent starts, code downloads the audio, takes the 15-second grid of Clips, and builds a draft Tracklist. The agent then reads the comments, follows up on gaps and conflicts, and returns the final Tracklist.
-- **Set Source** (YouTube boundary): turns any YouTube link into a video ID, and fetches Set info (title, channel, duration, description), comments and audio. Comments are fetched as up to about 3,000 top-level comments plus the replies to comments asking what a track is. It optionally uses browser cookies. It is built on yt-dlp, which needs Deno for YouTube's player challenges.
+- **Set Source** (YouTube boundary): turns any YouTube link into a video ID, and fetches Set info (title, channel, duration, description), comments and audio. Comments are fetched in two passes, because YouTube's "top" order stops after about 1,000 comments: the top comments with replies under the top threads (up to about 2,000 replies), and up to 3,000 of the newest comments. Top-level comments are then ordered by likes. It optionally uses browser cookies. It is built on yt-dlp, which needs Deno for YouTube's player challenges.
 - **Comment filter**: keeps the description, comments containing a timestamp, and replies to track-ID questions, and drops everything else before the agent sees it. On the design Set this keeps about 210 of 1,314 top-level comments.
 - **Recogniser** (swap point): takes one Clip and returns a Recognition (a Track, or nothing) or a refusal. The first implementation uses Shazam through the unofficial `shazamio` library.
 - **Scanner**: cuts Clips with ffmpeg and runs them through the Recogniser. Its pacing adapts: it sends as fast as accepted; on refusal it waits from 30 seconds, doubling up to about 10 minutes, then continues more slowly; it gives up after about 30 minutes of continuous refusals. Every Recognition is saved as soon as it arrives. It enforces the follow-up Clip ceiling.
@@ -105,13 +106,22 @@ A command-line tool, `djset`, that I run on my Mac with a YouTube Set link. It l
   - It is resolved from `--model`, then `DJSET_MODEL`, then the default `anthropic:claude-sonnet-5-5`.
   - API keys come from each provider's standard environment variable.
   - No provider-specific code lives in the agent.
-- **Evaluation**:
-  - The reference tracklists for the two test Sets are stored as data: Siangyoo 011 (`XNEO0Uq8zNA`, 36 entries) and Siangyoo 014 (`LTFCuhofnN8`, 30 entries).
+- **Evaluation** (`djset-eval`):
+  - The reference tracklists for the two test Sets are stored as data: Siangyoo 011 (`XNEO0Uq8zNA`, 36 entries) and Siangyoo 014 (`LTFCuhofnN8`, 30 lines, 37 entries once Blends are split into one entry per Track). An entry can list other titles the Track goes by (a clean title, an abbreviation).
   - A reference entry counts as found if the run lists the same artist and title, ignoring version text, within 45 seconds.
   - Stretches the reference doesn't name are excluded.
-  - It reports the share of reference entries found and the number of wrong Plays.
-  - Each Set runs in an audio-only mode (comments hidden) and in normal mode.
-  - Further details are to be agreed later.
+  - Measures for each run:
+    - Found (recall): the share of reference entries found.
+    - Precision: the share of identified Plays that match a reference entry.
+    - F1: the balance of the two, and the headline for comparing models.
+    - Wrong Plays and Unknown Tracks per Set.
+    - Timing: the median distance between a found entry and its Play.
+    - What the agent used: AI requests, tokens, cost (from Pydantic AI's price data, unknown for unlisted models), time and follow-up Clips.
+  - Each Set runs in an audio-only mode (comments hidden) and in normal mode by default; comments-only mode is available. In normal mode the agent can read the comment the reference came from, so it mostly measures comment reading; audio-only mode measures judgement over Recognitions.
+  - Models are compared on the same evidence: grid Recognitions are made once and shared, and each run's draft and Clip ceiling cover only the grid and that run's own follow-up Clips.
+  - Each model runs several times (3 by default), and models take turns within each round. Results show the mean with the lowest and highest run.
+  - A recognition-alone row (the draft turned straight into Plays, with no AI) is the baseline, so the AI's contribution is the difference.
+  - Evaluation runs never replace the user's saved Tracklists. Each comparison is saved as a Markdown report, the raw runs as JSON, and every run's Tracklist.
 - **Stack**: Python 3.12 (the released `shazamio` is reported to break on 3.13+), uv, Pydantic AI, yt-dlp with Deno, shazamio, Typer, ffmpeg (Homebrew).
 
 ## Testing Decisions
