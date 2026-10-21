@@ -5,6 +5,7 @@ description = "Works out which Tracks a DJ plays in a YouTube Set and prints a T
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "httpx2>=2.15",
     "pydantic>=2.11",
     "pydantic-ai-slim[anthropic,openai]>=2.58",
     "shazamio>=0.8.1",

@@ -1,6 +1,6 @@
 # djset
 
-Works out which Tracks a DJ plays in a YouTube Set, and when. It listens to the Set by sending short Clips of its audio to Shazam, reads the description and comments as hints, and uses an AI agent to settle gaps and disagreements. It prints a Tracklist where every Timestamp links to that moment in the video, and saves it as Markdown and JSON.
+Works out which Tracks a DJ plays in a YouTube Set, and when. It listens to the Set by sending short Clips of its audio to Shazam, reads the description and comments as hints, and uses an AI agent to settle gaps and disagreements. It prints a Tracklist where every Timestamp links to that moment in the video, and saves it as Markdown and JSON. It can then make a private Spotify playlist of the Tracks you choose.
 
 ## Setup (macOS)
 
@@ -35,8 +35,30 @@ Options:
 | `--keep-audio` | Keep the downloaded audio (normally deleted after a run). |
 | `--cookies-from-browser chrome` | Use your browser's YouTube sign-in, for age-restricted Sets or sign-in checks. |
 | `--model openai:gpt-5.2` | Use another AI model. Also settable as `DJSET_MODEL`. Default: `anthropic:claude-sonnet-5-5`. |
+| `--spotify` | Then make a private Spotify playlist of the Tracks you choose (see below). |
+| `--yes` | With `--spotify`, add every Track found on Spotify without asking. |
 
-Results are saved in `~/djset/<video-id>/`: `tracklist.md`, `tracklist.json` (versioned, for the later Spotify step) and `recognitions.jsonl`.
+Results are saved in `~/djset/<video-id>/`: `tracklist.md`, `tracklist.json`, `recognitions.jsonl`, and with `--spotify`, `spotify-searches.jsonl` and `playlist.json`.
+
+## Spotify playlists
+
+```sh
+uv run djset "https://www.youtube.com/watch?v=yA9girCNcds" --spotify
+```
+
+This uses the Set's saved Tracklist, or identifies the Set first. It then finds each Track on Spotify and shows the proposed playlist. Press Enter to add everything, type numbers to leave some out (`3 7-9`), or `n` to cancel. The playlist is private, named after the video, with the YouTube link in its description. No AI model is involved.
+
+- Tracks come out in Set order. A Track played twice is added once, and both Tracks of a Blend are added.
+- A Spotify Match must be by the same artist with the same title, so covers, karaoke, live, sped-up and remixed versions aren't picked for the Original.
+- When the DJ played an edit that isn't on Spotify, its Original is used and marked as such.
+- Tracks not on Spotify are listed; Unknown Tracks are left out.
+- Running `--spotify` again shows the playlist already made. After `--fresh` it makes a new one.
+
+One-time setup, since Spotify only lets personal tools in through your own app:
+
+1. Open the [Spotify developer dashboard](https://developer.spotify.com/dashboard) and create an app. Set the Redirect URI to `http://127.0.0.1:8888/callback` and tick Web API. The app's owner needs Spotify Premium.
+2. Copy its Client ID into your shell profile: `export SPOTIFY_CLIENT_ID=...`
+3. The first `--spotify` run opens your browser to sign in. The sign-in is saved in `~/djset/spotify-token.json` and lasts six months, after which you're asked again. To sign in with a different Spotify account from the app's owner, add that account under the app's User Management first.
 
 ## Comparing models
 

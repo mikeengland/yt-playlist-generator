@@ -1,6 +1,8 @@
-"""Stand-ins for the identification use case's boundaries: Set Source, Recogniser, model and Clock."""
+"""Stand-ins for the use cases' boundaries: Set Source, Recogniser, model and Clock, and Spotify and the Chooser."""
 
 import json
+import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,7 +14,9 @@ from pydantic_ai.messages import ModelMessage, ModelRequest
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from djset.comments import Comment
+from djset.playlist import Proposal, Suggestion
 from djset.recognition import Clip, Recognition, Refused
+from djset.spotify import SpotifyBusy, SpotifyPlaylist, SpotifyTrack, SpotifyUnavailable
 from djset.tracklist import SetInfo, Track
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -174,3 +178,87 @@ def play(
 
 def read_json(path: Path) -> Any:
     return json.loads(path.read_text())
+
+
+def spotify_track(artists: str, name: str) -> SpotifyTrack:
+    """A Spotify track named as Spotify names it, e.g. spotify_track("Tems, FNKY", "Love Me JeJe - FNKY Remix")."""
+    id_ = re.sub(r"\W+", "", f"{artists}{name}")[:22]
+    return SpotifyTrack(
+        uri=f"spotify:track:{id_}", url=f"https://open.spotify.com/track/{id_}", name=name, artists=artists.split(", ")
+    )
+
+
+@dataclass
+class MadePlaylist:
+    name: str
+    description: str
+    uris: list[str] = field(default_factory=list)
+
+
+class FakeSpotify:
+    """Answers searches from a small catalogue: tracks whose name and artists hold every word searched for (ignoring
+    case and accents), in catalogue order, at most 10. Records searches and the playlists made. It can be busy for
+    the next few requests or for every request after the first few, and can fail adding items."""
+
+    def __init__(
+        self,
+        catalogue: list[SpotifyTrack],
+        busy: list[SpotifyBusy] = (),
+        busy_after: int | None = None,
+        fail_on_add: int | None = None,
+    ) -> None:
+        self.catalogue = catalogue
+        self.busy = list(busy)
+        self.busy_after = busy_after
+        self.fail_on_add = fail_on_add
+        self.requests = 0
+        self.searches: list[str] = []
+        self.playlists: dict[str, MadePlaylist] = {}
+        self.add_requests: list[list[str]] = []
+
+    async def search(self, query: str) -> list[SpotifyTrack]:
+        self._maybe_busy()
+        self.searches.append(query)
+        wanted = _words(re.sub(r"\b(?:track|artist):", " ", query))
+        return [t for t in self.catalogue if wanted <= _words(f"{t.name} {' '.join(t.artists)}")][:10]
+
+    async def create_playlist(self, name: str, description: str) -> SpotifyPlaylist:
+        self._maybe_busy()
+        id_ = f"playlist{len(self.playlists) + 1}"
+        self.playlists[id_] = MadePlaylist(name, description)
+        return SpotifyPlaylist(id=id_, url=f"https://open.spotify.com/playlist/{id_}")
+
+    async def add_items(self, playlist_id: str, uris: list[str]) -> None:
+        self._maybe_busy()
+        if self.fail_on_add is not None and len(self.add_requests) + 1 == self.fail_on_add:
+            raise SpotifyUnavailable("Spotify refused the request (HTTP 400: Invalid base62 id).")
+        assert len(uris) <= 100, "Spotify adds at most 100 items per request"
+        self.add_requests.append(uris)
+        self.playlists[playlist_id].uris.extend(uris)
+
+    def _maybe_busy(self) -> None:
+        if self.busy:
+            raise self.busy.pop(0)
+        if self.busy_after is not None and self.requests >= self.busy_after:
+            raise SpotifyBusy("Spotify answered HTTP 503")
+        self.requests += 1
+
+
+def _words(text: str) -> set[str]:
+    plain = "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+    return set(re.findall(r"\w+", plain.casefold()))
+
+
+class ScriptedChooser:
+    """Chooses every suggestion except those numbered in `leave_out`, or none when cancelling. Records proposals."""
+
+    def __init__(self, leave_out: tuple[int, ...] = (), cancel: bool = False) -> None:
+        self.leave_out = leave_out
+        self.cancel = cancel
+        self.proposals: list[Proposal] = []
+
+    def choose(self, proposal: Proposal) -> list[Suggestion]:
+        self.proposals.append(proposal)
+        if self.cancel:
+            return []
+        return [s for s in proposal.suggestions if s.number not in self.leave_out]
