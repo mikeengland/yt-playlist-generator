@@ -52,9 +52,16 @@ class Proposal:
     """One Play per Track that has no Spotify Match. Unknown Tracks are left out altogether."""
 
 
+@dataclass
+class Correction:
+    """The listener's change to the Tracklist, in their own words, given instead of a choice."""
+
+    text: str
+
+
 class Chooser(Protocol):
-    def choose(self, proposal: Proposal) -> list[Suggestion]:
-        """The suggestions to add to the Playlist; none to make no Playlist."""
+    def choose(self, proposal: Proposal) -> list[Suggestion] | Correction:
+        """The suggestions to add to the Playlist, none to make no Playlist, or a Correction to make first."""
         ...
 
 
@@ -74,6 +81,8 @@ class PlaylistOutcome:
     proposal: Proposal | None
     """None when the Set's Playlist was made by an earlier run."""
     reused: bool
+    correction: Correction | None = None
+    """The listener's Correction, when they gave one instead of a choice. Nothing is made."""
 
 
 async def make_playlist(tracklist: Tracklist, boundaries: PlaylistBoundaries) -> PlaylistOutcome:
@@ -98,6 +107,8 @@ async def make_playlist(tracklist: Tracklist, boundaries: PlaylistBoundaries) ->
 
     proposal = _proposal(tracklist, found)
     chosen = boundaries.chooser.choose(proposal)
+    if isinstance(chosen, Correction):
+        return PlaylistOutcome(None, proposal, reused=False, correction=chosen)
     if not chosen:
         return PlaylistOutcome(None, proposal, reused=False)
     progress.step("Making the Spotify playlist")

@@ -38,6 +38,8 @@ class Evidence(StrEnum):
     CONFIRMED = "confirmed"
     AUDIO_ONLY = "audio only"
     COMMENTS_ONLY = "comments only"
+    LISTENER = "listener"
+    """The listener named the Track in a Correction."""
 
 
 class Play(BaseModel):
@@ -92,3 +94,28 @@ class Tracklist(BaseModel):
     set: SetInfo
     mode: Mode
     plays: list[Play]
+
+
+def in_order(plays: list[Play]) -> list[Play]:
+    """Plays in Timestamp order, each Blend at its earliest Timestamp and numbered in order. A Blend of one Play is
+    no Blend."""
+    plays = list(plays)
+    groups: dict[int, list[int]] = {}
+    for index, play in enumerate(plays):
+        if play.blend is not None:
+            groups.setdefault(play.blend, []).append(index)
+    for members in groups.values():
+        if len(members) == 1:
+            plays[members[0]] = plays[members[0]].model_copy(update={"blend": None})
+        else:
+            start = min(plays[i].timestamp for i in members)
+            for i in members:
+                plays[i] = plays[i].model_copy(update={"timestamp": start})
+
+    plays.sort(key=lambda play: (play.timestamp, play.blend is None, play.blend or 0))
+    numbers: dict[int, int] = {}
+    for index, play in enumerate(plays):
+        if play.blend is not None:
+            number = numbers.setdefault(play.blend, len(numbers) + 1)
+            plays[index] = play.model_copy(update={"blend": number})
+    return plays

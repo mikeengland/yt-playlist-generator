@@ -34,14 +34,16 @@ The tool runs on the user's Mac. Cloud sessions can fetch YouTube metadata and c
 - `uv run pytest`: the tests. They run offline, with fakes for YouTube, recognition, the model and the clock.
 - `uv run djset <youtube-link>`: identify a Set. Results go to `~/djset/<video-id>/` (or `$DJSET_HOME`).
 - `uv run djset <youtube-link> --spotify`: then make its Spotify playlist. Needs `SPOTIFY_CLIENT_ID` from the user's own Development Mode app.
+- `uv run djset <youtube-link> --correct "2:40 is Drake – Nokia"`: correct the Tracklist in the listener's own words. Needs the model's API key.
 - `uv run djset-eval [--model provider:model]... [--runs N]`: compare models against the reference Sets in `src/djset/references/`. It uses the real services, so it costs time and money; run it only when asked.
 - `uv run python scripts/capture_fixtures.py [--cloud] <video-id>...`: refresh test fixtures. In cloud sessions pass `--cloud`, and put a Deno binary on `PATH` (for example `uv pip install deno` into a scratch environment).
 
 ## Code
 
-There are two use cases, each a seam tests drive (see each spec's Testing Decisions):
+There are three use cases, each a seam tests drive (see each spec's Testing Decisions):
 
 - `src/djset/identify.py` turns a YouTube link into a Tracklist. Its boundaries are the Set Source (`youtube.py`), the Recogniser (`recognition.py`), the model (`model_choice.py`) and the Clock (`clock.py`).
-- `src/djset/playlist.py` turns a Tracklist into a Playlist. Its boundaries are Spotify (`spotify.py`), the Chooser (the listener's confirmation; `TerminalChooser` in `cli.py`) and the Clock. Matching rules are in `matching.py`.
+- `src/djset/correct.py` applies the listener's Correction to a Tracklist. Its boundary is the model, which only proposes changes to numbered Plays; plain code applies them. It must never be given Spotify data.
+- `src/djset/playlist.py` turns a Tracklist into a Playlist. Its boundaries are Spotify (`spotify.py`), the Chooser (the listener's confirmation or a Correction; `TerminalChooser` in `cli.py`) and the Clock. Matching rules are in `matching.py`.
 
 `tests/fakes.py` has a stand-in for each boundary. Tests assert on the resulting Tracklist or Playlist, saved files and what reaches a boundary, not on internals. The real Spotify client is tested against `httpx2.MockTransport` in `tests/test_spotify_adapter.py`.
