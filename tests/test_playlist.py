@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from djset.playlist import PlaylistBoundaries, PlaylistOutcome, make_playlist
+from djset.playlist import Correction, PlaylistBoundaries, PlaylistOutcome, make_playlist
 from djset.render import print_proposal
 from djset.spotify import SpotifyBusy, SpotifyUnavailable
 from djset.tracklist import Evidence, Mode, Play, Tracklist
@@ -252,6 +252,35 @@ def test_cancelling_makes_nothing_and_the_next_run_asks_again_without_searching_
     assert len(chooser.proposals) == 1
     assert second.playlists["playlist1"].uris == [WANNABE.uri, AGAIN.uri]
     assert not made.reused
+
+
+def test_a_correction_instead_of_a_choice_makes_nothing_and_is_returned(tmp_path):
+    spotify = FakeSpotify(CATALOGUE)
+    plays = tracklist(heard(15, "Spice Girls", "Wannabe"), heard(160, "Quantum Roots", "NOKIA"))
+
+    outcome = make(plays, tmp_path, spotify, chooser=ScriptedChooser(corrections=("2:40 is Drake – Nokia",)))
+
+    assert outcome.correction == Correction("2:40 is Drake – Nokia")
+    assert outcome.playlist is None
+    assert spotify.playlists == {}
+    assert [str(play.track) for play in outcome.proposal.unmatched] == ["Quantum Roots – NOKIA"]
+
+
+def test_a_corrected_tracklist_searches_spotify_only_for_the_corrected_track(tmp_path):
+    make(
+        tracklist(heard(15, "Spice Girls", "Wannabe"), heard(160, "Quantum Roots", "NOKIA")),
+        tmp_path,
+        FakeSpotify(CATALOGUE),
+        chooser=ScriptedChooser(corrections=("2:40 is Drake – Nokia",)),
+    )
+    corrected = Play(timestamp=160, track=track("Drake", "NOKIA"), evidence=Evidence.LISTENER)
+    spotify = FakeSpotify(CATALOGUE)
+
+    outcome = make(tracklist(heard(15, "Spice Girls", "Wannabe"), corrected), tmp_path, spotify)
+
+    assert spotify.searches == ['track:"NOKIA" artist:"Drake"']
+    assert spotify.playlists["playlist1"].uris == [WANNABE.uri, NOKIA.uri]
+    assert outcome.proposal.unmatched == []
 
 
 def test_a_made_playlist_is_shown_again_instead_of_made_twice(tmp_path):

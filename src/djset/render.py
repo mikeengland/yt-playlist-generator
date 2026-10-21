@@ -16,6 +16,7 @@ EVIDENCE_LABELS = {
     Evidence.CONFIRMED: "Confirmed",
     Evidence.AUDIO_ONLY: "audio only",
     Evidence.COMMENTS_ONLY: "comments only",
+    Evidence.LISTENER: "listener",
 }
 UNKNOWN = "Unknown Track"
 

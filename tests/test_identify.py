@@ -193,6 +193,22 @@ def test_an_edit_named_by_a_comment_is_kept_as_the_version(tmp_path):
     )
 
 
+def test_listener_evidence_from_the_agent_is_sent_back(tmp_path):
+    model = ScriptedModel(
+        call(("draft_tracklist", {}), ("comments", {})),
+        finish(play(15, "Spice Girls", "Wannabe", "listener")),
+        finish(play(15, "Spice Girls", "Wannabe", "audio only")),
+    )
+
+    outcome = run(Request(LINK), boundaries(tmp_path, model))
+
+    assert model.retries == [
+        '"listener" evidence is only for the listener\'s Corrections; nobody has corrected this Set.'
+        "\n\nFix the errors and try again."
+    ]
+    assert outcome.tracklist.plays[0].evidence == "audio only"
+
+
 def test_the_agent_sees_only_comments_that_can_hold_comment_hints(tmp_path):
     source = FixtureSource(
         set_info(description="Recorded live in Perth."),

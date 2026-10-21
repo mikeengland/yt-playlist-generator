@@ -1,15 +1,18 @@
-"""The edges of a run: links in, model and tool setup, and the listener's answer about the Playlist."""
+"""The edges of a run: links in, model and tool setup, the listener's answer about the Playlist, and Corrections
+shown."""
 
 import pytest
 
-from djset.cli import leave_out
+from djset.cli import answer, change_line
+from djset.correct import Change
 from djset.evaluation import references
 from djset.identify import MissingTool
 from djset.links import InvalidLink, video_id
 from djset.model_choice import DEFAULT_MODEL, ModelUnavailable, chosen_model, load_model
-from djset.playlist import Suggestion
+from djset.playlist import Correction, Suggestion
+from djset.tracklist import Evidence, Play
 from djset.youtube import YouTube
-from tests.fakes import spotify_track
+from tests.fakes import spotify_track, track
 
 
 @pytest.mark.parametrize(
@@ -77,7 +80,7 @@ SUGGESTIONS = [
 
 
 @pytest.mark.parametrize(
-    "answer, kept",
+    "text, kept",
     [
         ("", list(range(1, 11))),
         ("  y ", list(range(1, 11))),
@@ -85,15 +88,45 @@ SUGGESTIONS = [
         ("3 7-9", [1, 2, 4, 5, 6, 10]),
         ("1,2, 10", [3, 4, 5, 6, 7, 8, 9]),
         ("7 - 9", [1, 2, 3, 4, 5, 6, 10]),
+        ("7–9", [1, 2, 3, 4, 5, 6, 10]),
         ("1-10", []),
         ("n", []),
+        ("No", []),
     ],
 )
-def test_the_listener_leaves_plays_out_by_number_and_range(answer, kept):
-    assert [s.number for s in leave_out(SUGGESTIONS, answer)] == kept
+def test_the_listener_leaves_plays_out_by_number_and_range(text, kept):
+    assert [s.number for s in answer(SUGGESTIONS, text)] == kept
 
 
-@pytest.mark.parametrize("answer, problem", [("3 x", "isn't a number"), ("0", "within 1-10"), ("9-12", "within 1-10")])
-def test_an_answer_that_isnt_understood_is_explained(answer, problem):
+@pytest.mark.parametrize("text, problem", [("3-", "isn't a number"), ("0", "within 1-10"), ("9-12", "within 1-10")])
+def test_numbers_that_arent_understood_are_explained(text, problem):
     with pytest.raises(ValueError, match=problem):
-        leave_out(SUGGESTIONS, answer)
+        answer(SUGGESTIONS, text)
+
+
+@pytest.mark.parametrize("text", ["2:40 is Drake – Nokia", "  the Nokia one is by Drake ", "3 x", "yes please"])
+def test_any_other_answer_is_a_correction(text):
+    assert answer(SUGGESTIONS, text) == Correction(text.strip())
+
+
+def _play(timestamp: int, artist: str | None = None, title: str | None = None) -> Play:
+    evidence = Evidence.LISTENER if artist else None
+    return Play(timestamp=timestamp, track=track(artist, title) if artist else None, evidence=evidence)
+
+
+@pytest.mark.parametrize(
+    "before, after, line",
+    [
+        (
+            _play(160, "Quantum Roots", "NOKIA"),
+            _play(160, "Drake", "NOKIA"),
+            "2:40  Quantum Roots – NOKIA → Drake – NOKIA",
+        ),
+        (_play(160, "Quantum Roots", "NOKIA"), _play(160), "2:40  Quantum Roots – NOKIA → Unknown Track"),
+        (None, _play(100, "Usher", "Yeah!"), "Added 1:40  Usher – Yeah!"),
+        (_play(160, "Quantum Roots", "NOKIA"), None, "Removed 2:40  Quantum Roots – NOKIA"),
+        (_play(240, "Usher", "U Remind Me"), _play(230, "Usher", "U Remind Me"), "4:00 → 3:50  Usher – U Remind Me"),
+    ],
+)
+def test_each_change_a_correction_made_is_shown_as_one_line(before, after, line):
+    assert change_line(Change(before, after)) == line

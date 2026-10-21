@@ -23,6 +23,7 @@ Each Play says what it is based on:
 - **Confirmed**: recognition and a comment agree.
 - **audio only**: recognition alone.
 - **comments only**: a comment alone, for a stretch recognition couldn't identify.
+- **listener**: you named it in a Correction (see below).
 
 Stretches nobody could identify are listed as **Unknown Track**, with their own link so you can listen.
 
@@ -37,8 +38,23 @@ Options:
 | `--model openai:gpt-5.2` | Use another AI model. Also settable as `DJSET_MODEL`. Default: `anthropic:claude-sonnet-5-5`. |
 | `--spotify` | Then make a private Spotify playlist of the Tracks you choose (see below). |
 | `--yes` | With `--spotify`, add every Track found on Spotify without asking. |
+| `--correct "2:40 is Drake – Nokia"` | Correct the Tracklist in your own words (see below). Repeat for more. |
 
 Results are saved in `~/djset/<video-id>/`: `tracklist.md`, `tracklist.json`, `recognitions.jsonl`, and with `--spotify`, `spotify-searches.jsonl` and `playlist.json`.
+
+## Correcting a Tracklist
+
+When recognition gets a Track wrong and you know the right one, say so in your own words:
+
+```sh
+uv run djset "https://www.youtube.com/watch?v=yA9girCNcds" --correct "2:40 is Drake – Nokia"
+```
+
+The AI model works out which Plays you mean and what to change. You can name a Track ("2:40 is by Drake"), add one it missed ("Usher – Yeah! comes in at 12:10, over the Track before"), remove one that isn't in the Set, make one an Unknown Track ("I don't think 5:00 is right"), or move a Timestamp. Only the Plays you mention change. Each change is printed, corrected Plays are marked **listener** with the Track they replaced in their notes, and the corrected Tracklist is saved. Repeat `--correct`, or put several changes in one.
+
+With `--spotify` you can also type a Correction at the playlist prompt, as soon as you see a Track "not on Spotify". The proposal is then made again, with the corrected Track searched on Spotify. The model only ever sees the Tracklist and your words, never anything from Spotify.
+
+`--fresh` identifies the Set again from scratch, so it forgets Corrections.
 
 ## Spotify playlists
 
@@ -46,7 +62,7 @@ Results are saved in `~/djset/<video-id>/`: `tracklist.md`, `tracklist.json`, `r
 uv run djset "https://www.youtube.com/watch?v=yA9girCNcds" --spotify
 ```
 
-This uses the Set's saved Tracklist, or identifies the Set first. It then finds each Track on Spotify and shows the proposed playlist. Press Enter to add everything, type numbers to leave some out (`3 7-9`), or `n` to cancel. The playlist is private, named after the video, with the YouTube link in its description. No AI model is involved.
+This uses the Set's saved Tracklist, or identifies the Set first. It then finds each Track on Spotify and shows the proposed playlist. Press Enter to add everything, type numbers to leave some out (`3 7-9`), type a Correction (see above), or `n` to cancel. The playlist is private, named after the video, with the YouTube link in its description. Matching Tracks to Spotify involves no AI model.
 
 - Tracks come out in Set order. A Track played twice is added once, and both Tracks of a Blend are added.
 - A Spotify Match must be by the same artist with the same title, so covers, karaoke, live, sped-up and remixed versions aren't picked for the Original.

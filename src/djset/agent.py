@@ -11,16 +11,16 @@ from djset.draft import build_draft
 from djset.links import clock
 from djset.progress import Progress
 from djset.scanner import CeilingReached, GaveUp, Scanner
-from djset.tracklist import Mode, Play, SetInfo
+from djset.tracklist import Evidence, Mode, Play, SetInfo
 
 pydantic_ai.BANNER_ENABLED = False  # it would print over the run's progress display
 
 USAGE_LIMITS = UsageLimits(request_limit=60, total_tokens_limit=1_500_000)
 """The AI budget for one run. Input tokens include cached ones, so it runs out sooner than the cost suggests."""
 
-TERMS = """\
-You identify the Tracks a DJ plays in one recorded Set from YouTube and return its Tracklist.
+ROLE = "You identify the Tracks a DJ plays in one recorded Set from YouTube and return its Tracklist.\n\n"
 
+TERMS = """\
 Terms:
 - Track: one specific recording, down to its version. An edit or remix is a different Track from its Original.
 - Play: one occurrence of a Track in the Set, starting at a Timestamp: the moment it is first heard, even while it is \
@@ -103,7 +103,7 @@ class AgentTracklist(BaseModel):
 agent = Agent(
     deps_type=AgentDeps,
     output_type=AgentTracklist,
-    instructions=TERMS,
+    instructions=ROLE + TERMS,
     model_settings=ModelSettings(cache=True),
     retries=3,
     defer_model_check=True,
@@ -113,6 +113,13 @@ agent = Agent(
 @agent.instructions
 def _rules_for_mode(ctx: RunContext[AgentDeps]) -> str:
     return RULES + "\n" + MODE_INSTRUCTIONS[ctx.deps.mode]
+
+
+@agent.output_validator
+def _no_listener_evidence(output: AgentTracklist) -> AgentTracklist:
+    if any(play.evidence is Evidence.LISTENER for play in output.plays):
+        raise ModelRetry('"listener" evidence is only for the listener\'s Corrections; nobody has corrected this Set.')
+    return output
 
 
 async def _with_comments(ctx: RunContext[AgentDeps], tool: ToolDefinition) -> ToolDefinition | None:

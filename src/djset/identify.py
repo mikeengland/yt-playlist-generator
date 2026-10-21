@@ -23,7 +23,7 @@ from djset.recognition import Recogniser
 from djset.render import markdown
 from djset.scanner import Scanner, follow_up_ceiling
 from djset.store import SetStore, default_root
-from djset.tracklist import Evidence, Mode, Play, SetInfo, Tracklist
+from djset.tracklist import Evidence, Mode, Play, SetInfo, Tracklist, in_order
 
 UNKNOWN_GAP = 30
 """A gap in recognition at least this long (in seconds) becomes an Unknown Track when the agent can't finish."""
@@ -184,27 +184,7 @@ def tidy(plays: list[Play], mode: Mode, duration: int) -> list[Play]:
             update["evidence"] = forced
         return play.model_copy(update=update)
 
-    plays = [fixed(play) for play in plays]
-
-    groups: dict[int, list[int]] = {}
-    for index, play in enumerate(plays):
-        if play.blend is not None:
-            groups.setdefault(play.blend, []).append(index)
-    for members in groups.values():
-        if len(members) == 1:
-            plays[members[0]] = plays[members[0]].model_copy(update={"blend": None})
-        else:
-            start = min(plays[i].timestamp for i in members)
-            for i in members:
-                plays[i] = plays[i].model_copy(update={"timestamp": start})
-
-    plays.sort(key=lambda play: (play.timestamp, play.blend is None, play.blend or 0))
-    numbers: dict[int, int] = {}
-    for index, play in enumerate(plays):
-        if play.blend is not None:
-            number = numbers.setdefault(play.blend, len(numbers) + 1)
-            plays[index] = play.model_copy(update={"blend": number})
-    return plays
+    return in_order([fixed(play) for play in plays])
 
 
 def plays_from_draft(draft: Draft) -> list[Play]:
