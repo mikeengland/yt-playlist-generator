@@ -34,7 +34,15 @@ class SetStore:
         for path in self.folder.iterdir():
             if path.name.startswith("audio."):
                 continue
-            shutil.rmtree(path) if path.is_dir() else path.unlink()
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+
+    def forget_evidence(self) -> None:
+        """Forget the saved Set info, comments and Recognitions, keeping Tracklists and kept audio."""
+        for name in ("set.json", "comments.json", "recognitions.jsonl"):
+            (self.folder / name).unlink(missing_ok=True)
 
     def load_set_info(self) -> SetInfo | None:
         return self._load(self.folder / "set.json", SetInfo.model_validate_json)

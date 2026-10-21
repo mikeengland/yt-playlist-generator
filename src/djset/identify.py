@@ -4,10 +4,11 @@ This is the one seam tests drive. Its boundaries (Set Source, Recogniser, model 
 """
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from typing import Protocol
 
-from pydantic_ai import UsageLimitExceeded
+from pydantic_ai import RunUsage, UsageLimitExceeded
 from pydantic_ai.models import Model
 
 from djset.agent import AgentDeps, identify_plays
@@ -20,7 +21,7 @@ from djset.model_choice import load_model
 from djset.progress import Progress, SilentProgress
 from djset.recognition import Recogniser
 from djset.render import markdown
-from djset.scanner import Scanner
+from djset.scanner import Scanner, follow_up_ceiling
 from djset.store import SetStore, default_root
 from djset.tracklist import Evidence, Mode, Play, SetInfo, Tracklist
 
@@ -74,14 +75,34 @@ class Request:
     keep_audio: bool = False
     rerun: bool = False
     """Identify again even when a Tracklist is saved, reusing saved Recognitions (for evaluation)."""
+    save: bool = True
+    """Save the Tracklist in the Set's folder. Evaluation runs don't, so they never replace the user's Tracklist."""
+
+
+@dataclass
+class RunStats:
+    """What the agent used in one run."""
+
+    model: str
+    seconds: float
+    requests: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cost: Decimal | None
+    """In US dollars; None when the provider's prices aren't known."""
+    follow_up_clips: int
+    out_of_budget: bool
 
 
 @dataclass
 class Outcome:
     tracklist: Tracklist
-    markdown_path: Path
+    markdown_path: Path | None
     reused: bool
     """True when a saved Tracklist was shown instead of running again."""
+    stats: RunStats | None = None
+    """None when a saved Tracklist was shown."""
 
 
 async def identify(request: Request, boundaries: Boundaries) -> Outcome:
@@ -122,19 +143,35 @@ async def identify(request: Request, boundaries: Boundaries) -> Outcome:
             "Checking Recognitions against comments" if scanner and comments_text else "Writing the Tracklist"
         )
         deps = AgentDeps(set_info=info, mode=request.mode, comments=comments_text, scanner=scanner, progress=progress)
+        usage = RunUsage()
+        started = boundaries.clock.now()
+        out_of_budget = False
         try:
-            plays = await identify_plays(deps, model)
+            plays = await identify_plays(deps, model, usage)
         except UsageLimitExceeded as error:
             if scanner is None:
                 raise OutOfBudget(f"The AI budget ran out before the Tracklist was finished ({error}).") from error
             progress.note("The AI budget ran out, so this Tracklist comes from recognition alone.")
-            plays = plays_from_draft(build_draft(list(scanner.known.values())))
+            plays = plays_from_draft(build_draft(list(scanner.heard.values())))
+            out_of_budget = True
     finally:
         if not request.keep_audio:
             store.delete_audio()
 
+    stats = RunStats(
+        model=f"{model.system}:{model.model_name}",
+        seconds=boundaries.clock.now() - started,
+        requests=usage.requests,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cache_read_tokens=usage.cache_read_tokens,
+        cost=usage.cost,
+        follow_up_clips=follow_up_ceiling(info.duration) - scanner.follow_ups_left if scanner else 0,
+        out_of_budget=out_of_budget,
+    )
     tracklist = Tracklist(set=info, mode=request.mode, plays=tidy(plays, request.mode, info.duration))
-    return Outcome(tracklist, store.save_tracklist(tracklist, markdown(tracklist)), reused=False)
+    markdown_path = store.save_tracklist(tracklist, markdown(tracklist)) if request.save else None
+    return Outcome(tracklist, markdown_path, reused=False, stats=stats)
 
 
 def tidy(plays: list[Play], mode: Mode, duration: int) -> list[Play]:

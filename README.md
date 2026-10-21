@@ -38,11 +38,28 @@ Options:
 
 Results are saved in `~/djset/<video-id>/`: `tracklist.md`, `tracklist.json` (versioned, for the later Spotify step) and `recognitions.jsonl`.
 
+## Comparing models
+
+`djset-eval` runs the tool on Sets with trusted reference tracklists and compares models on the same Recognitions:
+
+```sh
+export ANTHROPIC_API_KEY=... OPENAI_API_KEY=...
+uv run djset-eval \
+  --model anthropic:claude-haiku-5-5 \
+  --model anthropic:claude-sonnet-5-5 \
+  --model anthropic:claude-opus-5-5 \
+  --model openai:gpt-6.1-sol \
+  --runs 3
+```
+
+For each model and mode it reports F1, the share of reference Tracks found, precision, wrong Plays, Unknown Tracks, Timestamp error, cost, tokens and time per Set, with the spread across runs. A `recognition alone (no AI)` row shows what the agent adds. Each comparison is saved to `~/djset/evaluations/<date-time>/` as `report.md`, `runs.json` and every run's Tracklist. `--mode audio-only`, `--mode normal` (the default is both) and `--mode comments-only` pick what runs; `--runs 1` gives a quick pass.
+
+It uses Shazam and the AI models for real, so it takes time and costs money: the first pass recognises each Set (about 10 minutes each), then each run adds the agent's time and cost.
+
 ## Development
 
 ```sh
 uv run pytest     # offline, no API keys needed
-uv run djset-eval # scores against reference Sets; uses Shazam and the AI model for real
 ```
 
 See `CLAUDE.md`, `GLOSSARY.md`, `docs/adr/` and `docs/specs/`.

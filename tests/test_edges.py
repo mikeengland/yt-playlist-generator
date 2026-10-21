@@ -1,14 +1,12 @@
-"""The edges of a run: links in, model and tool setup, and evaluation scoring."""
+"""The edges of a run: links in, and model and tool setup."""
 
 import pytest
 
-from djset.evaluation import Reference, ReferenceEntry, references, score
+from djset.evaluation import references
 from djset.identify import MissingTool
 from djset.links import InvalidLink, video_id
 from djset.model_choice import DEFAULT_MODEL, ModelUnavailable, chosen_model, load_model
-from djset.tracklist import Evidence, Mode, Play, Tracklist
 from djset.youtube import YouTube
-from tests.fakes import set_info, track
 
 
 @pytest.mark.parametrize(
@@ -67,53 +65,3 @@ def test_missing_tools_say_how_to_install_them(monkeypatch):
 def test_both_reference_sets_are_stored():
     stored = {r.video_id: len([e for e in r.entries if e.named]) for r in references()}
     assert stored == {"XNEO0Uq8zNA": 36, "LTFCuhofnN8": 37}
-
-
-REFERENCE = Reference(
-    video_id="abcdefghijk",
-    title="Test Set 001",
-    source="a test",
-    entries=[
-        ReferenceEntry(timestamp=10, artist="Spice Girls", title="Wannabe"),
-        ReferenceEntry(timestamp=60, artist="Lil Pump & Kanye West", title="I Love It"),
-        ReferenceEntry(timestamp=60, artist="Rihanna", title="Bitch Better Have My Money", also=["BBHMM"]),
-        ReferenceEntry(timestamp=120, artist=None, title=None),
-        ReferenceEntry(timestamp=180, artist="Tems", title="Love Me JeJe"),
-    ],
-)
-
-
-def tracklist(*plays: Play) -> Tracklist:
-    return Tracklist(set=set_info(), mode=Mode.NORMAL, plays=list(plays))
-
-
-def found(timestamp: int, artist: str, title: str, version: str | None = None) -> Play:
-    return Play(timestamp=timestamp, track=track(artist, title, version), evidence=Evidence.AUDIO_ONLY)
-
-
-def test_scoring_matches_artist_and_title_within_45_seconds_ignoring_versions():
-    result = score(
-        REFERENCE,
-        tracklist(
-            found(30, "Spice Girls", "Wannabe (Radio Edit)"),
-            found(75, "Kanye West, Lil Pump", "I Love It (feat. Adele Givens)"),
-            found(75, "Rihanna", "BBHMM"),
-            found(240, "Tems", "Love Me JeJe", version="FNKY Remix"),
-        ),
-    )
-
-    assert (result.found, result.named, result.wrong) == (3, 4, 1)
-
-
-def test_scoring_ignores_stretches_the_reference_does_not_name():
-    result = score(
-        REFERENCE,
-        tracklist(
-            found(10, "Spice Girls", "Wannabe"),
-            found(130, "Someone", "Something Else"),
-            found(200, "Drake", "NOKIA"),
-            Play(timestamp=150, track=None, evidence=None),
-        ),
-    )
-
-    assert (result.found, result.wrong, result.unknown, result.plays) == (1, 1, 1, 4)

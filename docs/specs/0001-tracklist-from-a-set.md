@@ -63,6 +63,7 @@ A command-line tool, `djset`, that I run on my Mac with a YouTube Set link. It l
 40. As the developer, I want the tests to run without YouTube, a recognition service or a paid model, so that they are fast, free and work in cloud sessions.
 41. As the developer, I want fixtures captured from real runs (Set info, comments and Recognitions), so that tests use realistic, messy data.
 42. As the developer, I want an evaluation command that scores the tool against Sets with trusted reference tracklists, in an audio-only mode with comments hidden and in normal mode, so that I know whether a change made identification better or worse.
+43. As the developer, I want the evaluation to compare AI models (for example Claude Haiku, Sonnet and Opus, and OpenAI's GPT models) on the same evidence, with accuracy, cost and time measures and their run-to-run spread, so that I know whether switching models keeps Tracklists accurate and what it costs.
 
 ## Implementation Decisions
 
@@ -105,13 +106,22 @@ A command-line tool, `djset`, that I run on my Mac with a YouTube Set link. It l
   - It is resolved from `--model`, then `DJSET_MODEL`, then the default `anthropic:claude-sonnet-5-5`.
   - API keys come from each provider's standard environment variable.
   - No provider-specific code lives in the agent.
-- **Evaluation**:
-  - The reference tracklists for the two test Sets are stored as data: Siangyoo 011 (`XNEO0Uq8zNA`, 36 entries) and Siangyoo 014 (`LTFCuhofnN8`, 30 entries).
+- **Evaluation** (`djset-eval`):
+  - The reference tracklists for the two test Sets are stored as data: Siangyoo 011 (`XNEO0Uq8zNA`, 36 entries) and Siangyoo 014 (`LTFCuhofnN8`, 30 lines, 37 entries once Blends are split into one entry per Track). An entry can list other titles the Track goes by (a clean title, an abbreviation).
   - A reference entry counts as found if the run lists the same artist and title, ignoring version text, within 45 seconds.
   - Stretches the reference doesn't name are excluded.
-  - It reports the share of reference entries found and the number of wrong Plays.
-  - Each Set runs in an audio-only mode (comments hidden) and in normal mode.
-  - Further details are to be agreed later.
+  - Measures for each run:
+    - Found (recall): the share of reference entries found.
+    - Precision: the share of identified Plays that match a reference entry.
+    - F1: the balance of the two, and the headline for comparing models.
+    - Wrong Plays and Unknown Tracks per Set.
+    - Timing: the median distance between a found entry and its Play.
+    - What the agent used: AI requests, tokens, cost (from Pydantic AI's price data, unknown for unlisted models), time and follow-up Clips.
+  - Each Set runs in an audio-only mode (comments hidden) and in normal mode by default; comments-only mode is available. In normal mode the agent can read the comment the reference came from, so it mostly measures comment reading; audio-only mode measures judgement over Recognitions.
+  - Models are compared on the same evidence: grid Recognitions are made once and shared, and each run's draft and Clip ceiling cover only the grid and that run's own follow-up Clips.
+  - Each model runs several times (3 by default), and models take turns within each round. Results show the mean with the lowest and highest run.
+  - A recognition-alone row (the draft turned straight into Plays, with no AI) is the baseline, so the AI's contribution is the difference.
+  - Evaluation runs never replace the user's saved Tracklists. Each comparison is saved as a Markdown report, the raw runs as JSON, and every run's Tracklist.
 - **Stack**: Python 3.12 (the released `shazamio` is reported to break on 3.13+), uv, Pydantic AI, yt-dlp with Deno, shazamio, Typer, ffmpeg (Homebrew).
 
 ## Testing Decisions

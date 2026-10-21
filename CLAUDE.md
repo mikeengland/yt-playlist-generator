@@ -32,7 +32,7 @@ The tool runs on the user's Mac. Cloud sessions can fetch YouTube metadata and c
 
 - `uv run pytest`: the tests. They run offline, with fakes for YouTube, recognition, the model and the clock.
 - `uv run djset <youtube-link>`: identify a Set. Results go to `~/djset/<video-id>/` (or `$DJSET_HOME`).
-- `uv run djset-eval`: score against the reference Sets in `src/djset/references/`. It uses the real services, so it costs time and money; run it only when asked.
+- `uv run djset-eval [--model provider:model]... [--runs N]`: compare models against the reference Sets in `src/djset/references/`. It uses the real services, so it costs time and money; run it only when asked.
 - `uv run python scripts/capture_fixtures.py [--cloud] <video-id>...`: refresh test fixtures. In cloud sessions pass `--cloud`, and put a Deno binary on `PATH` (for example `uv pip install deno` into a scratch environment).
 
 ## Code

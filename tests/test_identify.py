@@ -379,3 +379,18 @@ def test_saved_recognitions_from_a_real_run_can_be_replayed(tmp_path):
     run(Request(LINK), boundaries(tmp_path / "second", model, recogniser=replay))
 
     assert "0:15–1:00  Spice Girls – Wannabe  [4 Clips]" in model.results["draft_tracklist"][0]
+
+
+def test_each_run_sees_only_the_grid_and_its_own_follow_ups(tmp_path):
+    follow_ups = ("recognise", {"start": 150, "end": 195, "every": 5, "clip_length": 8})
+    first = run(Request(LINK), boundaries(tmp_path, ScriptedModel(call(follow_ups), finish())))
+    recogniser = TimelineRecogniser(TIMELINE)
+    model = ScriptedModel(call(("draft_tracklist", {})), call(follow_ups), finish())
+
+    second = run(Request(LINK, rerun=True), boundaries(tmp_path, model, recogniser=recogniser))
+
+    assert model.results["draft_tracklist"][0].startswith("Draft from 20 Clips.")
+    assert model.results["recognise"][0].startswith("0 follow-up Clips left.")
+    assert recogniser.requests == []
+    assert first.stats.follow_up_clips == second.stats.follow_up_clips == 9
+    assert (second.stats.requests, second.stats.cost) == (3, None)

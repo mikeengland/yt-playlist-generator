@@ -10,7 +10,7 @@ from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, T
 from rich.status import Status
 
 from djset.audio import AudioError
-from djset.identify import Boundaries, MissingTool, OutOfBudget, Request, SetUnavailable, identify
+from djset.identify import Boundaries, MissingTool, OutOfBudget, Request, RunStats, SetUnavailable, identify
 from djset.links import InvalidLink
 from djset.model_choice import SETTING, ModelUnavailable, chosen_model
 from djset.recognition import ShazamRecogniser
@@ -80,7 +80,15 @@ def djset(
     console.print()
     if outcome.reused:
         console.print("Saved from an earlier run. Use --fresh to identify the Set again.", style="dim")
+    if outcome.stats:
+        console.print(usage_line(outcome.stats), style="dim", highlight=False)
     console.print(f"Saved to {outcome.markdown_path}", style="dim", highlight=False)
+
+
+def usage_line(stats: RunStats) -> str:
+    cost = f"about ${stats.cost:.2f}" if stats.cost is not None else "cost unknown for this model"
+    tokens = stats.input_tokens + stats.output_tokens
+    return f"{stats.model}: {stats.requests} AI requests, {tokens / 1000:,.0f}k tokens, {cost}"
 
 
 def _fail(message: str) -> None:

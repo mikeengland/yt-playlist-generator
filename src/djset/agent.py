@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pydantic_ai
 from pydantic import BaseModel
-from pydantic_ai import Agent, ModelRetry, ModelSettings, RunContext, ToolDefinition, UsageLimits
+from pydantic_ai import Agent, ModelRetry, ModelSettings, RunContext, RunUsage, ToolDefinition, UsageLimits
 from pydantic_ai.models import Model
 
 from djset.draft import build_draft
@@ -146,15 +146,15 @@ async def draft_tracklist(ctx: RunContext[AgentDeps]) -> str:
 another Play's stretch (possible Blends), and lists gaps where nothing was recognised.
     """
     assert ctx.deps.scanner is not None
-    return build_draft(list(ctx.deps.scanner.known.values())).text()
+    return build_draft(list(ctx.deps.scanner.heard.values())).text()
 
 
 @agent.tool(prepare=_with_audio)
 async def recognise(ctx: RunContext[AgentDeps], start: int, end: int, every: int, clip_length: int) -> str:
     """Recognise follow-up Clips: one Clip of `clip_length` seconds every `every` seconds from `start` until `end`.
 
-    Clips already recognised cost nothing. New Clips count against a fixed limit for the run, and a request that \
-needs more new Clips than are left is refused.
+    Clips on the 15-second grid and Clips you already asked for cost nothing. Other Clips count against a fixed limit \
+for the run, and a request that needs more of them than are left is refused.
 
     Args:
         start: Seconds into the Set where the first Clip starts.
@@ -169,7 +169,7 @@ needs more new Clips than are left is refused.
     if not 3 <= every <= 60 or not 4 <= clip_length <= 20:
         raise ModelRetry("every must be from 3 to 60 seconds and clip_length from 4 to 20 seconds.")
     clips = scanner.clips(start, end, every, clip_length)
-    if scanner.follow_ups_left == 0 and any(clip not in scanner.known for clip in clips):
+    if scanner.follow_ups_left == 0 and any(clip not in scanner.heard for clip in clips):
         return "No follow-up Clips are left. Finish the Tracklist with what you have; mark what remains Unknown Track."
     ctx.deps.progress.note(f"Listening again to {clock(start)}–{clock(end)} ({len(clips)} Clips)")
     try:
@@ -195,12 +195,16 @@ def _budget_left(ctx: RunContext[AgentDeps]) -> str:
     return f"AI budget left: {turns} turns and {tokens:,} tokens; return the Tracklist well before either runs out."
 
 
-async def identify_plays(deps: AgentDeps, model: Model | str) -> list[Play]:
-    """Run the agent and return its Plays. Raises UsageLimitExceeded when the AI budget runs out."""
+async def identify_plays(deps: AgentDeps, model: Model | str, usage: RunUsage) -> list[Play]:
+    """Run the agent and return its Plays, adding what it used to `usage`.
+
+    Raises UsageLimitExceeded when the AI budget runs out; `usage` still holds what was used.
+    """
     result = await agent.run(
         f"Identify the Plays in the Set {deps.set_info.title!r} and return its Tracklist.",
         model=model,
         deps=deps,
+        usage=usage,
         usage_limits=USAGE_LIMITS,
     )
     return result.output.plays

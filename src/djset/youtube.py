@@ -56,7 +56,10 @@ class YouTube:
         if info.get("is_live") or info.get("live_status") in ("is_live", "is_upcoming"):
             raise SetUnavailable("This is a live stream. Run djset again once it has finished and been uploaded.")
         if not info.get("duration"):
-            raise SetUnavailable("YouTube didn't say how long this video is.")
+            raise SetUnavailable(
+                "YouTube didn't return this video's details, which usually means it wants a sign-in check. "
+                "Try again with --cookies-from-browser <browser>."
+            )
         return SetInfo(
             video_id=video_id,
             title=info.get("title") or video_id,

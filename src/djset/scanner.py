@@ -42,12 +42,26 @@ def follow_up_ceiling(duration: int) -> int:
     return math.ceil(FOLLOW_UPS_PER_HOUR * duration / 3600)
 
 
+def clips(duration: int, start: int, end: int, every: int, length: int) -> list[Clip]:
+    """Clips starting every `every` seconds from `start` up to `end`, cut short at the end of the Set."""
+    candidates = [Clip(s, min(length, duration - s)) for s in range(start, min(end, duration), every)]
+    return [clip for clip in candidates if clip.length >= SHORTEST_CLIP]
+
+
+def grid_clips(duration: int) -> list[Clip]:
+    """The 15-second grid of Clips taken across every Set before the agent starts."""
+    return clips(duration, 0, duration, GRID_EVERY, CLIP_LENGTH)
+
+
 class Scanner:
     """Recognises Clips of one Set.
 
     Sends as fast as the Recogniser accepts. On a refusal it waits from 30 seconds, doubling up to 10 minutes,
     then carries on with a gap between requests that grows with each refusal. It gives up after 30 minutes of
     continuous refusals. Clips already saved are never sent again.
+
+    What a run sees (`heard`, and the draft built from it) is the grid plus the follow-up Clips this run asked for,
+    never follow-ups saved by earlier runs, so runs with different models start from the same evidence.
     """
 
     def __init__(
@@ -65,40 +79,42 @@ class Scanner:
         self._clock = clock
         self._progress = progress
         self.duration = duration
-        self.known = store.recognitions()
+        self._saved = store.recognitions()
+        self.heard: dict[Clip, Recognition] = {}
         self.follow_ups_left = follow_up_ceiling(duration)
         self._gap = 0.0
         self._last_sent: float | None = None
 
     def clips(self, start: int, end: int, every: int, length: int) -> list[Clip]:
-        """Clips starting every `every` seconds from `start` up to `end`, cut short at the end of the Set."""
-        end = min(end, self.duration)
-        clips = [Clip(s, min(length, self.duration - s)) for s in range(start, end, every)]
-        return [clip for clip in clips if clip.length >= SHORTEST_CLIP]
-
-    def grid(self) -> list[Clip]:
-        return self.clips(0, self.duration, GRID_EVERY, CLIP_LENGTH)
+        return clips(self.duration, start, end, every, length)
 
     async def scan_grid(self) -> list[Recognition]:
-        grid = self.grid()
-        done = sum(clip in self.known for clip in grid)
+        grid = grid_clips(self.duration)
+        done = sum(clip in self._saved for clip in grid)
         self._progress.clips(done, len(grid))
         for clip in grid:
-            if clip not in self.known:
+            if clip not in self._saved:
                 await self._recognise(clip)
                 done += 1
                 self._progress.clips(done, len(grid))
-        return [self.known[clip] for clip in grid]
+            self.heard[clip] = self._saved[clip]
+        return [self.heard[clip] for clip in grid]
 
     async def follow_up(self, clips: list[Clip]) -> list[Recognition]:
-        """Recognise extra Clips chosen by the agent. Saved Clips are free; new ones count against the ceiling."""
-        new = [clip for clip in dict.fromkeys(clips) if clip not in self.known]
+        """Recognise extra Clips chosen by the agent.
+
+        Every Clip this run hasn't heard yet counts against the ceiling, even one an earlier run saved (which isn't
+        sent again), so the ceiling means the same for every run.
+        """
+        new = [clip for clip in dict.fromkeys(clips) if clip not in self.heard]
         if len(new) > self.follow_ups_left:
             raise CeilingReached(len(new), self.follow_ups_left)
         for clip in new:
-            await self._recognise(clip)
+            if clip not in self._saved:
+                await self._recognise(clip)
+            self.heard[clip] = self._saved[clip]
             self.follow_ups_left -= 1
-        return [self.known[clip] for clip in clips]
+        return [self.heard[clip] for clip in clips]
 
     async def _recognise(self, clip: Clip) -> Recognition:
         wait = FIRST_WAIT
@@ -125,7 +141,7 @@ class Scanner:
                 self._gap = min(max(self._gap * 2, FIRST_GAP), LONGEST_GAP)
             recognition = Recognition(start=clip.start, length=clip.length, track=track)
             self._store.add_recognition(recognition)
-            self.known[clip] = recognition
+            self._saved[clip] = recognition
             return recognition
 
     async def _space_out(self) -> None:
