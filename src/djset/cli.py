@@ -1,6 +1,7 @@
 """The `djset` command."""
 
 import asyncio
+import re
 from typing import Annotated
 
 import typer
@@ -13,9 +14,11 @@ from djset.audio import AudioError
 from djset.identify import Boundaries, MissingTool, OutOfBudget, Request, RunStats, SetUnavailable, identify
 from djset.links import InvalidLink
 from djset.model_choice import SETTING, ModelUnavailable, chosen_model
+from djset.playlist import PlaylistBoundaries, PlaylistOutcome, Proposal, Suggestion, make_playlist
 from djset.recognition import ShazamRecogniser
-from djset.render import print_tracklist
+from djset.render import print_proposal, print_tracklist
 from djset.scanner import GaveUp
+from djset.spotify import TOKEN_FILE, BrowserSignIn, SpotifyBusy, SpotifyUnavailable, SpotifyWebApi, client_id
 from djset.tracklist import Mode
 from djset.youtube import YouTube
 
@@ -42,8 +45,14 @@ def djset(
             metavar="PROVIDER:MODEL", help=f"The AI model. Default: {SETTING} or anthropic:claude-sonnet-5-5."
         ),
     ] = None,
+    spotify: Annotated[
+        bool, typer.Option("--spotify", help="Then make a private Spotify playlist of the Tracks you choose.")
+    ] = False,
+    yes: Annotated[
+        bool, typer.Option("--yes", help="With --spotify, add every Track found on Spotify without asking.")
+    ] = False,
 ) -> None:
-    """Work out which Tracks a DJ plays in a YouTube Set, and when."""
+    """Work out which Tracks a DJ plays in a YouTube Set, and when, and optionally make a Spotify playlist of them."""
     request = Request(
         link=link,
         mode=Mode.COMMENTS_ONLY if comments_only else Mode.NORMAL,
@@ -57,12 +66,28 @@ def djset(
         model=chosen_model(model),
         progress=progress,
     )
+    spotify_api = None
+    if spotify:
+        try:
+            spotify_api = SpotifyWebApi(client_id(), boundaries.store_root / TOKEN_FILE, BrowserSignIn(progress.note))
+        except SpotifyUnavailable as error:
+            _fail(str(error))
     try:
-        outcome = asyncio.run(identify(request, boundaries))
+        asyncio.run(_run(request, boundaries, spotify_api, TerminalChooser(console, progress, add_all=yes)))
     except KeyboardInterrupt:
         progress.close()
-        _fail("Stopped. Everything recognised so far is saved; run the same command to carry on.")
-    except (InvalidLink, SetUnavailable, MissingTool, ModelUnavailable, GaveUp, OutOfBudget, AudioError) as error:
+        _fail("Stopped. Everything found so far is saved; run the same command to carry on.")
+    except (
+        InvalidLink,
+        SetUnavailable,
+        MissingTool,
+        ModelUnavailable,
+        GaveUp,
+        OutOfBudget,
+        AudioError,
+        SpotifyUnavailable,
+        SpotifyBusy,
+    ) as error:
         progress.close()
         _fail(str(error))
     except ModelAPIError as error:
@@ -74,15 +99,93 @@ def djset(
             f"The AI model didn't return a usable Tracklist ({error}). "
             "Recognitions are saved; run the same command to try again."
         )
-    progress.close()
-    console.print()
-    print_tracklist(console, outcome.tracklist)
-    console.print()
+
+
+async def _run(
+    request: Request, boundaries: Boundaries, spotify: SpotifyWebApi | None, chooser: "TerminalChooser"
+) -> None:
+    progress = boundaries.progress
+    try:
+        if spotify:
+            await spotify.sign_in()
+        outcome = await identify(request, boundaries)
+        progress.close()
+        console.print()
+        print_tracklist(console, outcome.tracklist)
+        console.print()
+        if outcome.reused:
+            console.print("Saved from an earlier run. Use --fresh to identify the Set again.", style="dim")
+        if outcome.stats:
+            console.print(usage_line(outcome.stats), style="dim", highlight=False)
+        console.print(f"Saved to {outcome.markdown_path}", style="dim", highlight=False)
+        if spotify:
+            playlist_boundaries = PlaylistBoundaries(
+                spotify=spotify, chooser=chooser, progress=progress, store_root=boundaries.store_root
+            )
+            made = await make_playlist(outcome.tracklist, playlist_boundaries)
+            progress.close()
+            console.print()
+            console.print(playlist_line(made), highlight=False)
+    finally:
+        if spotify:
+            await spotify.aclose()
+
+
+def playlist_line(outcome: PlaylistOutcome) -> str:
+    playlist = outcome.playlist
+    if playlist is None:
+        return "No Spotify playlist made."
     if outcome.reused:
-        console.print("Saved from an earlier run. Use --fresh to identify the Set again.", style="dim")
-    if outcome.stats:
-        console.print(usage_line(outcome.stats), style="dim", highlight=False)
-    console.print(f"Saved to {outcome.markdown_path}", style="dim", highlight=False)
+        return f"This Set's Spotify playlist is already made: {playlist.url}"
+    count = len(playlist.tracks)
+    tracks = f"{count} Track{'' if count == 1 else 's'}"
+    return f"Made the private Spotify playlist {playlist.name!r} with {tracks}: {playlist.url}"
+
+
+class TerminalChooser:
+    """Shows the proposed Playlist and asks which Plays to leave out, unless told to add them all."""
+
+    def __init__(self, console: Console, progress: "TerminalProgress", add_all: bool):
+        self._console = console
+        self._progress = progress
+        self._add_all = add_all
+
+    def choose(self, proposal: Proposal) -> list[Suggestion]:
+        self._progress.close()
+        self._console.print()
+        print_proposal(self._console, proposal)
+        if self._add_all or not proposal.suggestions:
+            return proposal.suggestions
+        prompt = (
+            f"Press Enter to add all {len(proposal.suggestions)}, type numbers to leave out (like 3 7-9), "
+            "or n to cancel: "
+        )
+        while True:
+            try:
+                return leave_out(proposal.suggestions, self._console.input(prompt))
+            except ValueError as error:
+                self._console.print(f"[red]{error}[/red]", highlight=False)
+            except EOFError:
+                return []
+
+
+def leave_out(suggestions: list[Suggestion], answer: str) -> list[Suggestion]:
+    """The suggestions left after the listener's answer: Enter keeps all, numbers and ranges leave some out, n none."""
+    answer = answer.strip().casefold()
+    if answer in ("", "y", "yes"):
+        return suggestions
+    if answer in ("n", "no", "q"):
+        return []
+    left_out: set[int] = set()
+    for part in re.split(r"[\s,]+", re.sub(r"\s*[-–]\s*", "-", answer)):
+        numbers = re.fullmatch(r"(\d+)(?:-(\d+))?", part)
+        if not numbers:
+            raise ValueError(f"{part!r} isn't a number or a range like 7-9.")
+        first, last = int(numbers[1]), int(numbers[2] or numbers[1])
+        if not 1 <= first <= last <= len(suggestions):
+            raise ValueError(f"{part} isn't within 1-{len(suggestions)}.")
+        left_out.update(range(first, last + 1))
+    return [suggestion for suggestion in suggestions if suggestion.number not in left_out]
 
 
 def usage_line(stats: RunStats) -> str:
@@ -128,7 +231,7 @@ class TerminalProgress:
         self._console.print(f"[yellow]{reason}. Waiting {_duration(wait)} before retrying{refusing}.[/yellow]")
 
     def note(self, message: str) -> None:
-        self._console.print(f"[dim]{message}[/dim]", highlight=False)
+        self._console.print(message, style="dim", highlight=False, soft_wrap=True)
 
     def close(self) -> None:
         if self._status is not None:

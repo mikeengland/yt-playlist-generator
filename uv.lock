@@ -270,6 +270,7 @@ name = "djset"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx2" },
     { name = "pydantic" },
     { name = "pydantic-ai-slim", extra = ["anthropic", "openai"] },
     { name = "shazamio" },
@@ -284,6 +285,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx2", specifier = ">=2.15" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "openai"], specifier = ">=2.58" },
     { name = "shazamio", specifier = ">=0.8.1" },

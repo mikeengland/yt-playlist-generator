@@ -1,6 +1,6 @@
 # djset
 
-A command-line agent that works out which Tracks a DJ plays in a YouTube Set, and when, and prints a Tracklist with links to each Timestamp. Spotify playlists come later.
+A command-line agent that works out which Tracks a DJ plays in a YouTube Set, and when, and prints a Tracklist with links to each Timestamp. With `--spotify` it then makes a private Spotify playlist of the Tracks the listener chooses.
 
 ## Language
 
@@ -23,18 +23,25 @@ A command-line agent that works out which Tracks a DJ plays in a YouTube Set, an
 - **shazamio** for recognition, behind a single swap point so a licensed service can replace or join it.
 - **Typer** for the command line.
 - **ffmpeg** (Homebrew on macOS) for cutting Clips.
+- **httpx2** (already installed with Pydantic AI) for Spotify's Web API, through our own small client rather than spotipy. Matching Tracks to Spotify is plain code: Spotify's Developer Policy forbids feeding Spotify content into an AI model, so it must never reach the agent.
 
 ## Environment
 
-The tool runs on the user's Mac. Cloud sessions can fetch YouTube metadata and comments, but YouTube bot-checks downloads and the network policy blocks its media hosts (`*.googlevideo.com`), so Set audio can only be downloaded locally.
+The tool runs on the user's Mac. Cloud sessions can fetch YouTube metadata and comments, but YouTube bot-checks downloads and the network policy blocks its media hosts (`*.googlevideo.com`), so Set audio can only be downloaded locally. Spotify's API is reachable, but signing in needs a browser on the same machine, so Playlists can only be made locally too.
 
 ## Commands
 
 - `uv run pytest`: the tests. They run offline, with fakes for YouTube, recognition, the model and the clock.
 - `uv run djset <youtube-link>`: identify a Set. Results go to `~/djset/<video-id>/` (or `$DJSET_HOME`).
+- `uv run djset <youtube-link> --spotify`: then make its Spotify playlist. Needs `SPOTIFY_CLIENT_ID` from the user's own Development Mode app.
 - `uv run djset-eval [--model provider:model]... [--runs N]`: compare models against the reference Sets in `src/djset/references/`. It uses the real services, so it costs time and money; run it only when asked.
 - `uv run python scripts/capture_fixtures.py [--cloud] <video-id>...`: refresh test fixtures. In cloud sessions pass `--cloud`, and put a Deno binary on `PATH` (for example `uv pip install deno` into a scratch environment).
 
 ## Code
 
-`src/djset/identify.py` is the use case and the one seam tests drive (see the spec's Testing Decisions). Its boundaries are the Set Source (`youtube.py`), the Recogniser (`recognition.py`), the model (`model_choice.py`) and the Clock (`clock.py`); `tests/fakes.py` has a stand-in for each. Tests assert on the resulting Tracklist, saved files and what reaches a boundary, not on internals.
+There are two use cases, each a seam tests drive (see each spec's Testing Decisions):
+
+- `src/djset/identify.py` turns a YouTube link into a Tracklist. Its boundaries are the Set Source (`youtube.py`), the Recogniser (`recognition.py`), the model (`model_choice.py`) and the Clock (`clock.py`).
+- `src/djset/playlist.py` turns a Tracklist into a Playlist. Its boundaries are Spotify (`spotify.py`), the Chooser (the listener's confirmation; `TerminalChooser` in `cli.py`) and the Clock. Matching rules are in `matching.py`.
+
+`tests/fakes.py` has a stand-in for each boundary. Tests assert on the resulting Tracklist or Playlist, saved files and what reaches a boundary, not on internals. The real Spotify client is tested against `httpx2.MockTransport` in `tests/test_spotify_adapter.py`.

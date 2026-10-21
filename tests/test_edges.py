@@ -1,12 +1,15 @@
-"""The edges of a run: links in, and model and tool setup."""
+"""The edges of a run: links in, model and tool setup, and the listener's answer about the Playlist."""
 
 import pytest
 
+from djset.cli import leave_out
 from djset.evaluation import references
 from djset.identify import MissingTool
 from djset.links import InvalidLink, video_id
 from djset.model_choice import DEFAULT_MODEL, ModelUnavailable, chosen_model, load_model
+from djset.playlist import Suggestion
 from djset.youtube import YouTube
+from tests.fakes import spotify_track
 
 
 @pytest.mark.parametrize(
@@ -65,3 +68,32 @@ def test_missing_tools_say_how_to_install_them(monkeypatch):
 def test_both_reference_sets_are_stored():
     stored = {r.video_id: len([e for e in r.entries if e.named]) for r in references()}
     assert stored == {"XNEO0Uq8zNA": 36, "LTFCuhofnN8": 37}
+
+
+SUGGESTIONS = [
+    Suggestion(number=n, match=spotify_track("Artist", f"Track {n}").model_dump() | {"original": False}, plays=[])
+    for n in range(1, 11)
+]
+
+
+@pytest.mark.parametrize(
+    "answer, kept",
+    [
+        ("", list(range(1, 11))),
+        ("  y ", list(range(1, 11))),
+        ("3", [1, 2, 4, 5, 6, 7, 8, 9, 10]),
+        ("3 7-9", [1, 2, 4, 5, 6, 10]),
+        ("1,2, 10", [3, 4, 5, 6, 7, 8, 9]),
+        ("7 - 9", [1, 2, 3, 4, 5, 6, 10]),
+        ("1-10", []),
+        ("n", []),
+    ],
+)
+def test_the_listener_leaves_plays_out_by_number_and_range(answer, kept):
+    assert [s.number for s in leave_out(SUGGESTIONS, answer)] == kept
+
+
+@pytest.mark.parametrize("answer, problem", [("3 x", "isn't a number"), ("0", "within 1-10"), ("9-12", "within 1-10")])
+def test_an_answer_that_isnt_understood_is_explained(answer, problem):
+    with pytest.raises(ValueError, match=problem):
+        leave_out(SUGGESTIONS, answer)

@@ -65,3 +65,7 @@ _Avoid_: disagreement, dispute
 **Spotify Match**:
 The Spotify track chosen to stand in for a Track. It may be the Track's Original when the exact version isn't on Spotify, and is then marked as such.
 _Avoid_: Spotify result, Spotify track
+
+**Playlist**:
+The private Spotify playlist made for one Set, holding the Spotify Matches of the Plays the listener chose, in Tracklist order.
+_Avoid_: Spotify list

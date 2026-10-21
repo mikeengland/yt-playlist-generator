@@ -25,11 +25,11 @@ class Track(BaseModel):
         return f"{name} ({self.version})" if self.version else name
 
     def same_as(self, other: "Track") -> bool:
-        return _key(self) == _key(other)
+        return self.key() == other.key()
 
-
-def _key(track: Track) -> tuple[str, str, str]:
-    return (track.artist.casefold().strip(), track.title.casefold().strip(), (track.version or "").casefold().strip())
+    def key(self) -> tuple[str, str, str]:
+        """What makes two Tracks the same, ignoring case and surrounding spaces."""
+        return (self.artist.casefold().strip(), self.title.casefold().strip(), (self.version or "").casefold().strip())
 
 
 class Evidence(StrEnum):

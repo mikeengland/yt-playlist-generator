@@ -1,4 +1,5 @@
-"""The Tracklist for people: a terminal table and a Markdown file, with a link to every Timestamp."""
+"""The Tracklist for people (a terminal table and a Markdown file, with a link to every Timestamp), and the proposed
+Spotify playlist."""
 
 from collections import Counter
 
@@ -7,6 +8,8 @@ from rich.table import Table
 from rich.text import Text
 
 from djset.links import clock, watch_url
+from djset.playlist import Proposal
+from djset.spotify import SpotifyMatch
 from djset.tracklist import Evidence, Mode, Play, Tracklist
 
 EVIDENCE_LABELS = {
@@ -89,3 +92,39 @@ def print_tracklist(console: Console, tracklist: Tracklist) -> None:
         )
     console.print(table)
     console.print(summary(tracklist))
+
+
+ORIGINAL = "the Original: this version isn't on Spotify"
+
+
+def print_proposal(console: Console, proposal: Proposal) -> None:
+    """Each proposed Spotify Match next to its Plays, and the Tracks not on Spotify, in Tracklist order."""
+    console.print(f"[bold]Spotify playlist:[/bold] {proposal.name} (private)", highlight=False)
+    table = Table(show_edge=False, pad_edge=False, header_style="bold")
+    table.add_column("#", justify="right", no_wrap=True)
+    table.add_column("Time", justify="right", no_wrap=True)
+    table.add_column("Track", ratio=1)
+    table.add_column("Spotify Match", ratio=1)
+    rows = [(s.plays[0].timestamp, s) for s in proposal.suggestions] + [(p.timestamp, p) for p in proposal.unmatched]
+    for _, row in sorted(rows, key=lambda row: row[0]):
+        if isinstance(row, Play):
+            table.add_row("", clock(row.timestamp), track_text(row), Text("not on Spotify", style="dim"))
+        else:
+            times = ", ".join(clock(play.timestamp) for play in row.plays)
+            tracks = " / ".join(dict.fromkeys(track_text(play) for play in row.plays))
+            table.add_row(str(row.number), times, tracks, match_text(row.match))
+    console.print(table)
+    console.print(proposal_summary(proposal))
+
+
+def match_text(match: SpotifyMatch) -> Text:
+    text = Text(str(match), style=f"link {match.url}")
+    if match.original:
+        text.append(f" ({ORIGINAL})", style="dim")
+    return text
+
+
+def proposal_summary(proposal: Proposal) -> str:
+    found = len(proposal.suggestions)
+    missing = len(proposal.unmatched)
+    return f"{found} Track{'' if found == 1 else 's'} found on Spotify, {missing} not on Spotify"

@@ -1,4 +1,4 @@
-"""One folder per Set, holding its saved Recognitions, Tracklists and (when kept) audio."""
+"""One folder per Set, holding its saved Recognitions, Tracklists, Spotify searches, Playlist and (when kept) audio."""
 
 import json
 import os
@@ -9,6 +9,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from djset.comments import Comment
 from djset.recognition import Clip, Recognition
+from djset.spotify import Playlist, Search
 from djset.tracklist import Mode, SetInfo, Tracklist
 
 _COMMENTS = TypeAdapter(list[Comment])
@@ -85,6 +86,31 @@ class SetStore:
         markdown_path = self.tracklist_path(tracklist.mode, ".md")
         self._write(markdown_path, markdown)
         return markdown_path
+
+    def spotify_searches(self) -> dict[tuple[str, str, str], Search]:
+        """What searching Spotify found for each Track searched so far, by Track."""
+        path = self.folder / "spotify-searches.jsonl"
+        if not path.exists():
+            return {}
+        found = {}
+        for line in path.read_text().splitlines():
+            try:
+                search = Search.model_validate_json(line)
+            except ValidationError:
+                continue  # a line cut short when a run was stopped mid-write
+            found[search.track.key()] = search
+        return found
+
+    def add_spotify_search(self, search: Search) -> None:
+        self.folder.mkdir(parents=True, exist_ok=True)
+        with (self.folder / "spotify-searches.jsonl").open("a") as file:
+            file.write(search.model_dump_json() + "\n")
+
+    def load_playlist(self) -> Playlist | None:
+        return self._load(self.folder / "playlist.json", Playlist.model_validate_json)
+
+    def save_playlist(self, playlist: Playlist) -> None:
+        self._write(self.folder / "playlist.json", playlist.model_dump_json(indent=2))
 
     def audio_path(self) -> Path | None:
         """The kept audio file, if a previous run kept one."""
