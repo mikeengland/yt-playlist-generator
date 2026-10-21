@@ -1,5 +1,6 @@
 # Claude reviews each pull request with the official code-review plugin and posts its findings as PR comments.
-# Setup: https://code.claude.com/docs/en/github-actions (needs the Claude GitHub App and an ANTHROPIC_API_KEY secret).
+# Setup: https://code.claude.com/docs/en/github-actions (needs the Claude GitHub App and a CLAUDE_CODE_OAUTH_TOKEN
+# secret from `claude setup-token`, which bills the Claude subscription).
 name: Claude Code Review
 
 on:
@@ -25,7 +26,7 @@ jobs:
           fetch-depth: 1
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
           prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
