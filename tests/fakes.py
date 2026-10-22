@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import TypeAdapter
-from pydantic_ai import ModelResponse, ToolCallPart, ToolReturnPart
+from pydantic_ai import ModelResponse, RetryPromptPart, ToolCallPart, ToolReturnPart, UserPromptPart
 from pydantic_ai.messages import ModelMessage, ModelRequest
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from djset.comments import Comment
-from djset.playlist import Proposal, Suggestion
+from djset.playlist import Correction, Proposal, Suggestion
 from djset.recognition import Clip, Recognition, Refused
 from djset.spotify import SpotifyBusy, SpotifyPlaylist, SpotifyTrack, SpotifyUnavailable
 from djset.tracklist import SetInfo, Track
@@ -134,17 +134,23 @@ Turn = Callable[[list[ModelMessage], AgentInfo], list[Any]]
 
 
 class ScriptedModel(FunctionModel):
-    """A model that plays a fixed script of turns, recording the tools offered and the tool results it was given."""
+    """A model that plays a fixed script of turns, recording the tools offered, the prompts and tool results it was
+    given, and what it was asked to retry."""
 
     def __init__(self, *turns: Turn):
         self.turns = list(turns)
         self.offered: list[str] = []
+        self.prompts: list[str] = []
         self.results: dict[str, list[str]] = {}
+        self.retries: list[str] = []
         super().__init__(self._respond)
 
     def _respond(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         self.offered = [tool.name for tool in info.function_tools]
         self.results = tool_results(messages)
+        parts = [part for message in messages if isinstance(message, ModelRequest) for part in message.parts]
+        self.prompts = [str(part.content) for part in parts if isinstance(part, UserPromptPart)]
+        self.retries = [part.model_response() for part in parts if isinstance(part, RetryPromptPart)]
         turn = self.turns.pop(0)
         return ModelResponse(parts=turn(messages, info))
 
@@ -166,7 +172,12 @@ def call(*calls: tuple[str, dict[str, Any]]) -> Turn:
 
 def finish(*plays: dict[str, Any]) -> Turn:
     """A turn that returns the final Tracklist."""
-    return lambda messages, info: [ToolCallPart(info.output_tools[0].name, {"plays": list(plays)})]
+    return output(plays=list(plays))
+
+
+def output(**fields: Any) -> Turn:
+    """A turn that returns the agent's output."""
+    return lambda messages, info: [ToolCallPart(info.output_tools[0].name, fields)]
 
 
 def play(
@@ -250,15 +261,21 @@ def _words(text: str) -> set[str]:
 
 
 class ScriptedChooser:
-    """Chooses every suggestion except those numbered in `leave_out`, or none when cancelling. Records proposals."""
+    """Answers with each of `corrections` in turn, then chooses every suggestion except those numbered in `leave_out`,
+    or none when cancelling. Records proposals."""
 
-    def __init__(self, leave_out: tuple[int, ...] = (), cancel: bool = False) -> None:
+    def __init__(
+        self, leave_out: tuple[int, ...] = (), cancel: bool = False, corrections: tuple[str, ...] = ()
+    ) -> None:
         self.leave_out = leave_out
         self.cancel = cancel
+        self.corrections = list(corrections)
         self.proposals: list[Proposal] = []
 
-    def choose(self, proposal: Proposal) -> list[Suggestion]:
+    def choose(self, proposal: Proposal) -> list[Suggestion] | Correction:
         self.proposals.append(proposal)
+        if self.corrections:
+            return Correction(self.corrections.pop(0))
         if self.cancel:
             return []
         return [s for s in proposal.suggestions if s.number not in self.leave_out]

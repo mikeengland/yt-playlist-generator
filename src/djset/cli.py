@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+from dataclasses import dataclass
 from typing import Annotated
 
 import typer
@@ -11,15 +12,16 @@ from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, T
 from rich.status import Status
 
 from djset.audio import AudioError
+from djset.correct import Change, Corrected, CorrectionBoundaries, CorrectionFailed, correct
 from djset.identify import Boundaries, MissingTool, OutOfBudget, Request, RunStats, SetUnavailable, identify
-from djset.links import InvalidLink
+from djset.links import InvalidLink, clock
 from djset.model_choice import SETTING, ModelUnavailable, chosen_model
-from djset.playlist import PlaylistBoundaries, PlaylistOutcome, Proposal, Suggestion, make_playlist
+from djset.playlist import Correction, PlaylistBoundaries, PlaylistOutcome, Proposal, Suggestion, make_playlist
 from djset.recognition import ShazamRecogniser
-from djset.render import print_proposal, print_tracklist
+from djset.render import print_proposal, print_tracklist, track_text
 from djset.scanner import GaveUp
 from djset.spotify import TOKEN_FILE, BrowserSignIn, SpotifyBusy, SpotifyUnavailable, SpotifyWebApi, client_id
-from djset.tracklist import Mode
+from djset.tracklist import Mode, Tracklist
 from djset.youtube import YouTube
 
 app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
@@ -51,6 +53,25 @@ def djset(
     yes: Annotated[
         bool, typer.Option("--yes", help="With --spotify, add every Track found on Spotify without asking.")
     ] = False,
+    new_playlist: Annotated[
+        bool,
+        typer.Option("--new-playlist", help="With --spotify, make a new playlist even if this Set's is already made."),
+    ] = False,
+    playlist_name: Annotated[
+        str | None,
+        typer.Option(
+            metavar="NAME",
+            help="With --spotify, name the playlist (default: the video's title). A new name makes a new playlist.",
+        ),
+    ] = None,
+    corrections: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--correct",
+            metavar="TEXT",
+            help='Correct the Tracklist in your own words, like "2:40 is Drake – Nokia". Repeat for more.',
+        ),
+    ] = None,
 ) -> None:
     """Work out which Tracks a DJ plays in a YouTube Set, and when, and optionally make a Spotify playlist of them."""
     request = Request(
@@ -73,7 +94,9 @@ def djset(
         except SpotifyUnavailable as error:
             _fail(str(error))
     try:
-        asyncio.run(_run(request, boundaries, spotify_api, TerminalChooser(console, progress, add_all=yes)))
+        chooser = TerminalChooser(console, progress, add_all=yes)
+        playlist_request = PlaylistRequest(name=playlist_name, new=new_playlist)
+        asyncio.run(_run(request, boundaries, corrections or [], spotify_api, chooser, playlist_request))
     except KeyboardInterrupt:
         progress.close()
         _fail("Stopped. Everything found so far is saved; run the same command to carry on.")
@@ -87,6 +110,7 @@ def djset(
         AudioError,
         SpotifyUnavailable,
         SpotifyBusy,
+        CorrectionFailed,
     ) as error:
         progress.close()
         _fail(str(error))
@@ -102,17 +126,30 @@ def djset(
 
 
 async def _run(
-    request: Request, boundaries: Boundaries, spotify: SpotifyWebApi | None, chooser: "TerminalChooser"
+    request: Request,
+    boundaries: Boundaries,
+    corrections: list[str],
+    spotify: SpotifyWebApi | None,
+    chooser: "TerminalChooser",
+    playlist_request: "PlaylistRequest",
 ) -> None:
     progress = boundaries.progress
+    correcting = CorrectionBoundaries(model=boundaries.model, progress=progress, store_root=boundaries.store_root)
     try:
         if spotify:
             await spotify.sign_in()
         outcome = await identify(request, boundaries)
+        tracklist = outcome.tracklist
+        corrected = []
+        for correction in corrections:
+            corrected.append(await correct(tracklist, correction, correcting))
+            tracklist = corrected[-1].tracklist
         progress.close()
         console.print()
-        print_tracklist(console, outcome.tracklist)
+        print_tracklist(console, tracklist)
         console.print()
+        for each in corrected:
+            print_corrected(each)
         if outcome.reused:
             console.print("Saved from an earlier run. Use --fresh to identify the Set again.", style="dim")
         if outcome.stats:
@@ -122,7 +159,9 @@ async def _run(
             playlist_boundaries = PlaylistBoundaries(
                 spotify=spotify, chooser=chooser, progress=progress, store_root=boundaries.store_root
             )
-            made = await make_playlist(outcome.tracklist, playlist_boundaries)
+            name, new = playlist_request.name, playlist_request.new
+            while (made := await make_playlist(tracklist, playlist_boundaries, name, new)).correction:
+                tracklist = await _corrected_at_prompt(tracklist, made.correction, correcting)
             progress.close()
             console.print()
             console.print(playlist_line(made), highlight=False)
@@ -131,42 +170,108 @@ async def _run(
             await spotify.aclose()
 
 
+async def _corrected_at_prompt(
+    tracklist: Tracklist, correction: Correction, boundaries: CorrectionBoundaries
+) -> Tracklist:
+    """The Tracklist with a Correction typed at the Spotify prompt made, or as it was when the model fails."""
+    try:
+        corrected = await correct(tracklist, correction.text, boundaries)
+    except (ModelUnavailable, CorrectionFailed) as error:
+        boundaries.progress.close()
+        errors.print(f"[red]{error}[/red]", highlight=False)
+        return tracklist
+    boundaries.progress.close()
+    console.print()
+    print_corrected(corrected)
+    return corrected.tracklist
+
+
+def print_corrected(corrected: Corrected) -> None:
+    if corrected.changes:
+        console.print("[bold]Corrected the Tracklist:[/bold]")
+        for change in corrected.changes:
+            console.print(f"  {change_line(change)}", highlight=False)
+    else:
+        console.print("Nothing in the Tracklist changed.")
+    if corrected.reply:
+        console.print(corrected.reply, style="yellow", highlight=False)
+
+
+def change_line(change: Change) -> str:
+    before, after = change.before, change.after
+    if before is None:
+        return f"Added {clock(after.timestamp)}  {track_text(after)}"
+    if after is None:
+        return f"Removed {clock(before.timestamp)}  {track_text(before)}"
+    time = clock(before.timestamp)
+    if after.timestamp != before.timestamp:
+        time += f" → {clock(after.timestamp)}"
+    track = track_text(before)
+    if track_text(after) != track:
+        track += f" → {track_text(after)}"
+    return f"{time}  {track}"
+
+
+@dataclass
+class PlaylistRequest:
+    name: str | None
+    new: bool
+
+
 def playlist_line(outcome: PlaylistOutcome) -> str:
     playlist = outcome.playlist
     if playlist is None:
         return "No Spotify playlist made."
     if outcome.reused:
-        return f"This Set's Spotify playlist is already made: {playlist.url}"
+        return (
+            f"This Set's Spotify playlist is already made: {playlist.url}\n"
+            "Deleted it on Spotify? Use --new-playlist to make another, or --playlist-name to give it a new name."
+        )
     count = len(playlist.tracks)
     tracks = f"{count} Track{'' if count == 1 else 's'}"
     return f"Made the private Spotify playlist {playlist.name!r} with {tracks}: {playlist.url}"
 
 
 class TerminalChooser:
-    """Shows the proposed Playlist and asks which Plays to leave out, unless told to add them all."""
+    """Shows the proposed Playlist and asks which Plays to leave out, or for a Correction, unless told to add them
+    all."""
 
     def __init__(self, console: Console, progress: "TerminalProgress", add_all: bool):
         self._console = console
         self._progress = progress
         self._add_all = add_all
 
-    def choose(self, proposal: Proposal) -> list[Suggestion]:
+    def choose(self, proposal: Proposal) -> list[Suggestion] | Correction:
         self._progress.close()
         self._console.print()
         print_proposal(self._console, proposal)
-        if self._add_all or not proposal.suggestions:
+        if self._add_all:
             return proposal.suggestions
-        prompt = (
-            f"Press Enter to add all {len(proposal.suggestions)}, type numbers to leave out (like 3 7-9), "
-            "or n to cancel: "
+        self._console.print(
+            'To correct the Tracklist first, describe the change, like "2:40 is Drake – Nokia".', style="dim"
         )
+        if proposal.suggestions:
+            prompt = (
+                f"Press Enter to add all {len(proposal.suggestions)}, type numbers to leave out (like 3 7-9), "
+                "a Correction, or n to cancel: "
+            )
+        else:
+            prompt = "Type a Correction, or press Enter to make no playlist: "
         while True:
             try:
-                return leave_out(proposal.suggestions, self._console.input(prompt))
+                return answer(proposal.suggestions, self._console.input(prompt))
             except ValueError as error:
                 self._console.print(f"[red]{error}[/red]", highlight=False)
             except EOFError:
                 return []
+
+
+def answer(suggestions: list[Suggestion], text: str) -> list[Suggestion] | Correction:
+    """The listener's answer at the Spotify prompt: Enter, numbers and ranges or n choose (see leave_out), and
+    anything else is a Correction."""
+    if re.fullmatch(r"[\d\s,–-]*|\s*(?:y|yes|n|no|q)\s*", text, flags=re.IGNORECASE):
+        return leave_out(suggestions, text)
+    return Correction(text.strip())
 
 
 def leave_out(suggestions: list[Suggestion], answer: str) -> list[Suggestion]:

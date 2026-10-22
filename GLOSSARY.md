@@ -60,6 +60,10 @@ _Avoid_: verified play
 A Comment Hint naming a different Track from the one recognition heard at that time.
 _Avoid_: disagreement, dispute
 
+**Correction**:
+The listener's change to a Tracklist, in their own words, such as naming the Track a Play really is. It outranks Recognitions and Comment Hints.
+_Avoid_: edit (in DJ use, a version of a Track), fix, override
+
 ### Spotify
 
 **Spotify Match**:
