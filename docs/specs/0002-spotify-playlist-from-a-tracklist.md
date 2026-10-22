@@ -50,12 +50,13 @@
 27. As a listener, I want the run to wait and retry when Spotify says it is busy, and stop with a clear message if it stays busy, so that rate limits and quotas don't kill a run or hang it.
 28. As a listener, I want every Spotify search saved as it arrives, so that a stopped run picks up where it stopped and searches aren't repeated.
 29. As a listener, I want running `--spotify` again on a Set whose Playlist is already made to show its link instead of making another, so that I don't end up with duplicate Playlists.
-30. As a listener, I want a Playlist whose creation was interrupted part-way through adding Tracks to be finished by the next run, so that I don't get a half-empty Playlist and a second one.
+30. As a listener, I want to make a new Playlist for a Set whose Playlist I deleted on Spotify, with `--new-playlist` or under a new name with `--playlist-name`, so that a deleted Playlist doesn't block me and I don't have to identify the Set again.
+31. As a listener, I want a Playlist whose creation was interrupted part-way through adding Tracks to be finished by the next run, so that I don't get a half-empty Playlist and a second one.
 
 ### Building and maintaining it
 
-31. As the developer, I want the tests to run without Spotify or a browser, so that they are fast, free and work in cloud sessions.
-32. As the developer, I want Spotify behind a single interface, so that the playlist use case is tested against a fake catalogue and the real client is tested against recorded request shapes.
+32. As the developer, I want the tests to run without Spotify or a browser, so that they are fast, free and work in cloud sessions.
+33. As the developer, I want Spotify behind a single interface, so that the playlist use case is tested against a fake catalogue and the real client is tested against recorded request shapes.
 
 ## Implementation Decisions
 
@@ -67,7 +68,7 @@
   - **Progress**.
 
   Steps:
-  1. If the Set's Playlist is already made, it shows that Playlist, and first finishes adding its Tracks if a run stopped part-way.
+  1. If the Set's Playlist is already made, it shows that Playlist, and first finishes adding its Tracks if a run stopped part-way. It makes a new one instead when asked to (`--new-playlist`) or when given a name (`--playlist-name`) other than the made one's. The new one replaces the old in `playlist.json`; the saved searches are reused. Deleting a playlist on Spotify only unfollows it, and the tool doesn't ask Spotify whether that happened, so making another is the listener's call.
   2. Otherwise it searches Spotify once for each distinct identified Track not searched before, and saves each result as it arrives.
   3. It builds the proposal and asks the Chooser.
   4. It creates the Playlist, saves it before adding anything, then adds its Tracks in chunks of 100, saving progress after each.
@@ -106,7 +107,7 @@
   - A 403 stops with the Development Mode explanation.
 - **Set store**: the Set's folder gains `spotify-searches.jsonl` (each Track searched and its Spotify Match or nothing) and `playlist.json` (the Playlist's ID, link, name, chosen Spotify Matches and how many are added). `--fresh` forgets both, like everything else saved for the Set. A later `--spotify` then makes a new Playlist, and the old one stays on Spotify.
 - **CLI**:
-  - `--spotify` and `--yes` join `djset`.
+  - `--spotify`, `--yes`, `--new-playlist` and `--playlist-name` join `djset`.
   - With `--spotify`, the Client ID is checked and the sign-in done before identification. The Tracklist is printed as before, then the proposal.
   - The prompt takes Enter (add all), numbers and ranges to leave out, or `n` (cancel).
   - The run ends with the Playlist's link.
@@ -123,7 +124,7 @@
   - unmatched Plays and Unknown Tracks
   - leaving Plays out, and cancelling
   - resuming searches and a part-made Playlist
-  - a made Playlist not made twice
+  - a made Playlist not made twice, unless a new one or a new name is asked for
   - busy Spotify, waits and giving up
 - **The real client**: tested against `httpx2.MockTransport` for the documented request shapes (search parameters, the private playlist body, the `uris` body), PKCE (the challenge is the S256 of the verifier sent to the token endpoint), token saving, refreshing and re-sign-in on `invalid_grant`, and 429/403 handling. The local sign-in server is tested with a real request to a free port.
 - **The prompt's parsing** ("3 7-9") is tested at the edge, like links.

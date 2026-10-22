@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+from dataclasses import dataclass
 from typing import Annotated
 
 import typer
@@ -52,6 +53,17 @@ def djset(
     yes: Annotated[
         bool, typer.Option("--yes", help="With --spotify, add every Track found on Spotify without asking.")
     ] = False,
+    new_playlist: Annotated[
+        bool,
+        typer.Option("--new-playlist", help="With --spotify, make a new playlist even if this Set's is already made."),
+    ] = False,
+    playlist_name: Annotated[
+        str | None,
+        typer.Option(
+            metavar="NAME",
+            help="With --spotify, name the playlist (default: the video's title). A new name makes a new playlist.",
+        ),
+    ] = None,
     corrections: Annotated[
         list[str] | None,
         typer.Option(
@@ -83,7 +95,8 @@ def djset(
             _fail(str(error))
     try:
         chooser = TerminalChooser(console, progress, add_all=yes)
-        asyncio.run(_run(request, boundaries, corrections or [], spotify_api, chooser))
+        playlist_request = PlaylistRequest(name=playlist_name, new=new_playlist)
+        asyncio.run(_run(request, boundaries, corrections or [], spotify_api, chooser, playlist_request))
     except KeyboardInterrupt:
         progress.close()
         _fail("Stopped. Everything found so far is saved; run the same command to carry on.")
@@ -118,6 +131,7 @@ async def _run(
     corrections: list[str],
     spotify: SpotifyWebApi | None,
     chooser: "TerminalChooser",
+    playlist_request: "PlaylistRequest",
 ) -> None:
     progress = boundaries.progress
     correcting = CorrectionBoundaries(model=boundaries.model, progress=progress, store_root=boundaries.store_root)
@@ -145,7 +159,8 @@ async def _run(
             playlist_boundaries = PlaylistBoundaries(
                 spotify=spotify, chooser=chooser, progress=progress, store_root=boundaries.store_root
             )
-            while (made := await make_playlist(tracklist, playlist_boundaries)).correction:
+            name, new = playlist_request.name, playlist_request.new
+            while (made := await make_playlist(tracklist, playlist_boundaries, name, new)).correction:
                 tracklist = await _corrected_at_prompt(tracklist, made.correction, correcting)
             progress.close()
             console.print()
@@ -197,12 +212,21 @@ def change_line(change: Change) -> str:
     return f"{time}  {track}"
 
 
+@dataclass
+class PlaylistRequest:
+    name: str | None
+    new: bool
+
+
 def playlist_line(outcome: PlaylistOutcome) -> str:
     playlist = outcome.playlist
     if playlist is None:
         return "No Spotify playlist made."
     if outcome.reused:
-        return f"This Set's Spotify playlist is already made: {playlist.url}"
+        return (
+            f"This Set's Spotify playlist is already made: {playlist.url}\n"
+            "Deleted it on Spotify? Use --new-playlist to make another, or --playlist-name to give it a new name."
+        )
     count = len(playlist.tracks)
     tracks = f"{count} Track{'' if count == 1 else 's'}"
     return f"Made the private Spotify playlist {playlist.name!r} with {tracks}: {playlist.url}"

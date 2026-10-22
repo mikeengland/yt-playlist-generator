@@ -49,13 +49,20 @@ def tracklist(*plays: Play) -> Tracklist:
 
 
 def make(
-    tracklist: Tracklist, tmp_path: Path, spotify: FakeSpotify, chooser=None, clock=None, progress=None
+    tracklist: Tracklist,
+    tmp_path: Path,
+    spotify: FakeSpotify,
+    chooser=None,
+    clock=None,
+    progress=None,
+    name: str | None = None,
+    new: bool = False,
 ) -> PlaylistOutcome:
     extra = {"progress": progress} if progress else {}
     boundaries = PlaylistBoundaries(
         spotify=spotify, chooser=chooser or ScriptedChooser(), clock=clock or FakeClock(), store_root=tmp_path, **extra
     )
-    return asyncio.run(make_playlist(tracklist, boundaries))
+    return asyncio.run(make_playlist(tracklist, boundaries, name, new))
 
 
 def names(outcome: PlaylistOutcome) -> list[str]:
@@ -294,6 +301,41 @@ def test_a_made_playlist_is_shown_again_instead_of_made_twice(tmp_path):
     assert again.reused
     assert again.playlist.url == "https://open.spotify.com/playlist/playlist1"
     assert (spotify.searches, spotify.playlists, chooser.proposals) == ([], {}, [])
+
+
+def test_a_new_playlist_can_be_made_for_a_set_whose_playlist_is_already_made(tmp_path):
+    plays = tracklist(heard(15, "Spice Girls", "Wannabe"))
+    first = FakeSpotify(CATALOGUE)
+    make(plays, tmp_path, first)
+    first.playlists.clear()  # the listener deleted it on Spotify
+    spotify = FakeSpotify(CATALOGUE)
+    chooser = ScriptedChooser()
+
+    again = make(plays, tmp_path, spotify, chooser=chooser, new=True)
+
+    assert not again.reused
+    assert spotify.searches == []
+    assert [proposal.name for proposal in chooser.proposals] == [set_info().title]
+    assert spotify.playlists["playlist1"].uris == [WANNABE.uri]
+    assert make(plays, tmp_path, FakeSpotify(CATALOGUE)).reused
+
+
+def test_a_new_name_makes_a_new_playlist_and_the_same_name_shows_the_made_one(tmp_path):
+    plays = tracklist(heard(15, "Spice Girls", "Wannabe"))
+    make(plays, tmp_path, FakeSpotify(CATALOGUE))
+    spotify = FakeSpotify(CATALOGUE)
+
+    renamed = make(plays, tmp_path, spotify, name="Friday mix")
+
+    assert not renamed.reused
+    assert renamed.proposal.name == "Friday mix"
+    assert spotify.playlists["playlist1"] == MadePlaylist(
+        "Friday mix", f"The Tracks from the Set at {set_info().url}", [WANNABE.uri]
+    )
+    assert read_json(tmp_path / set_info().video_id / "playlist.json")["name"] == "Friday mix"
+    same = make(plays, tmp_path, FakeSpotify(CATALOGUE), name="Friday mix")
+    assert same.reused
+    assert same.playlist.name == "Friday mix"
 
 
 def test_a_playlist_stopped_part_way_is_finished_by_the_next_run(tmp_path):

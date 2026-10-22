@@ -85,11 +85,20 @@ class PlaylistOutcome:
     """The listener's Correction, when they gave one instead of a choice. Nothing is made."""
 
 
-async def make_playlist(tracklist: Tracklist, boundaries: PlaylistBoundaries) -> PlaylistOutcome:
+async def make_playlist(
+    tracklist: Tracklist, boundaries: PlaylistBoundaries, name: str | None = None, new: bool = False
+) -> PlaylistOutcome:
+    """The Set's Playlist, made once and shown again on later runs.
+
+    `name` names the Playlist (the Set's title by default). A new Playlist is made, though the Set's Playlist was
+    made by an earlier run, when `new` is set or the earlier one has a different name: the listener may have deleted
+    it on Spotify. The earlier one is then forgotten, but stays on Spotify if it is still there.
+    """
     store = SetStore(boundaries.store_root, tracklist.set.video_id)
     progress = boundaries.progress
     spotify = _Patient(boundaries.spotify, boundaries.clock, progress)
-    if (made := store.load_playlist()) is not None:
+    made = store.load_playlist()
+    if made is not None and not new and name in (None, made.name):
         if made.added < len(made.tracks):
             progress.step("Adding the rest of the Tracks to the Spotify playlist")
             await _fill(made, spotify, store)
@@ -105,7 +114,7 @@ async def make_playlist(tracklist: Tracklist, boundaries: PlaylistBoundaries) ->
         store.add_spotify_search(search)
         found[track.key()] = search
 
-    proposal = _proposal(tracklist, found)
+    proposal = _proposal(tracklist, found, name or tracklist.set.title)
     chosen = boundaries.chooser.choose(proposal)
     if isinstance(chosen, Correction):
         return PlaylistOutcome(None, proposal, reused=False, correction=chosen)
@@ -130,7 +139,7 @@ async def _find(track: Track, spotify: "_Patient") -> SpotifyMatch | None:
     return original
 
 
-def _proposal(tracklist: Tracklist, found: dict[tuple[str, str, str], Search]) -> Proposal:
+def _proposal(tracklist: Tracklist, found: dict[tuple[str, str, str], Search], name: str) -> Proposal:
     suggestions: dict[str, Suggestion] = {}
     unmatched: dict[tuple[str, str, str], Play] = {}
     for play in tracklist.plays:
@@ -143,7 +152,7 @@ def _proposal(tracklist: Tracklist, found: dict[tuple[str, str, str], Search]) -
             suggestions[match.uri].plays.append(play)
         else:
             suggestions[match.uri] = Suggestion(number=len(suggestions) + 1, match=match, plays=[play])
-    return Proposal(tracklist.set.title, list(suggestions.values()), list(unmatched.values()))
+    return Proposal(name, list(suggestions.values()), list(unmatched.values()))
 
 
 def _description(info: SetInfo) -> str:

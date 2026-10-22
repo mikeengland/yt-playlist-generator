@@ -38,6 +38,8 @@ Options:
 | `--model openai:gpt-5.2` | Use another AI model. Also settable as `DJSET_MODEL`. Default: `anthropic:claude-sonnet-5-5`. |
 | `--spotify` | Then make a private Spotify playlist of the Tracks you choose (see below). |
 | `--yes` | With `--spotify`, add every Track found on Spotify without asking. |
+| `--new-playlist` | With `--spotify`, make a new playlist even if this Set's is already made. |
+| `--playlist-name "Friday mix"` | With `--spotify`, name the playlist (default: the video's title). A new name makes a new playlist. |
 | `--correct "2:40 is Drake – Nokia"` | Correct the Tracklist in your own words (see below). Repeat for more. |
 
 Results are saved in `~/djset/<video-id>/`: `tracklist.md`, `tracklist.json`, `recognitions.jsonl`, and with `--spotify`, `spotify-searches.jsonl` and `playlist.json`.
@@ -68,7 +70,7 @@ This uses the Set's saved Tracklist, or identifies the Set first. It then finds 
 - A Spotify Match must be by the same artist with the same title, so covers, karaoke, live, sped-up and remixed versions aren't picked for the Original.
 - When the DJ played an edit that isn't on Spotify, its Original is used and marked as such.
 - Tracks not on Spotify are listed; Unknown Tracks are left out.
-- Running `--spotify` again shows the playlist already made. After `--fresh` it makes a new one.
+- Running `--spotify` again shows the playlist already made. If you deleted it on Spotify, add `--new-playlist` to make another (or `--playlist-name "..."` to make one with a new name). This reuses the saved Tracklist and Spotify searches, so it's quick. `--fresh` also makes a new one, but identifies the Set again first.
 
 One-time setup, since Spotify only lets personal tools in through your own app:
 
